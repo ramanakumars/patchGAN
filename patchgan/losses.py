@@ -21,10 +21,7 @@ adversarial_loss = nn.BCELoss()
 
 def generator_loss(generated_img, target_img):
     gen_loss = tversky(target_img, generated_img, beta = 0.7)
-#     l1_l = l1_loss(generated_image, target_img)
-    gen_total_loss = gen_loss # get rid of L1 loss + (100 * l1_l)
-    #print(gen_loss)
-    return gen_total_loss
+    return gen_loss
 
 def discriminator_loss(output, label):
     disc_loss = 350*adversarial_loss(output, label)

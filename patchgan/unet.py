@@ -11,7 +11,8 @@ class UnetSkipConnectionBlock(nn.Module):
     """
 
     def __init__(self, outer_nc, inner_nc, input_nc=None,
-                 submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False):
+                 submodule=None, outermost=False, innermost=False, 
+                 activation='tanh', norm_layer=nn.BatchNorm2d, use_dropout=False):
         """Construct a Unet submodule with skip connections.
         Parameters:
             outer_nc (int) -- the number of filters in the outer conv layer
@@ -29,31 +30,37 @@ class UnetSkipConnectionBlock(nn.Module):
             input_nc = outer_nc
         downconv = nn.Conv2d(input_nc, inner_nc, kernel_size=4,
                              stride=2, padding=1, bias=False)
-        downrelu = nn.LeakyReLU(0.2, True)
+
+        if activation=='tanh':
+            downact = nn.Tanh()
+            upact   = nn.Tanh()
+        else:
+            downact = nn.LeakyReLU(0.2, True)
+            upact   = nn.ReLU(True)
+
         downnorm = norm_layer(inner_nc)
-        uprelu = nn.ReLU(True)
         upnorm = norm_layer(outer_nc)
 
         if outermost:
             upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1)
-            down = [downconv]
-            up = [uprelu, upconv, nn.Sigmoid()] ##
+            down = [downconv, downact, downnorm]
+            up = [upconv, nn.Sigmoid()] ##
             model = down + [submodule] + up
         elif innermost:
             upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1, bias=False)
-            down = [downconv, downrelu]
-            up = [upconv, uprelu, upnorm]
+            down = [downconv, downact]
+            up = [upconv, upact, upnorm]
             model = down + up
         else:
             upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1, bias=False)
-            down = [downconv, downrelu, downnorm]
-            up = [upconv, uprelu, upnorm]
+            down = [downconv, downact, downnorm]
+            up = [upconv, upact, upnorm]
 
             if use_dropout:
                 model = down + [submodule] + up + [nn.Dropout(0.5)]
@@ -147,7 +154,9 @@ class Discriminator(nn.Module):
 class UnetGenerator(nn.Module):
     """Create a Unet-based generator"""
 
-    def __init__(self, input_nc, output_nc, nf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+    def __init__(self, input_nc, output_nc, nf=64, 
+                 norm_layer=nn.BatchNorm2d, use_dropout=False,
+                 activation='tanh'):
         """Construct a Unet generator
         Parameters:
             input_nc (int)  -- the number of channels in input images
@@ -161,18 +170,26 @@ class UnetGenerator(nn.Module):
         """
         super(UnetGenerator, self).__init__()
         # construct unet structure
-        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)  # add the innermost layer
+        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, 
+                                             activation=activation, submodule=None, 
+                                             norm_layer=norm_layer, innermost=True)  # add the innermost layer
         
         # add intermediate layers with ngf * 8 filters
-        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
-        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
-        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
+        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
+                                             submodule=unet_block, norm_layer=norm_layer, 
+                                             use_dropout=use_dropout)
+        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
+                                             submodule=unet_block, norm_layer=norm_layer,
+                                             use_dropout=use_dropout)
+        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
+                                             submodule=unet_block, norm_layer=norm_layer,
+                                             use_dropout=use_dropout)
         
         # gradually reduce the number of filters from nf * 8 to nf
-        unet_block = UnetSkipConnectionBlock(nf * 4, nf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock(nf * 2, nf * 4, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock(nf, nf * 2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        self.model = UnetSkipConnectionBlock(output_nc, nf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)  # add the outermost layer
+        unet_block = UnetSkipConnectionBlock(nf * 4, nf * 8, input_nc=None, activation=activation, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(nf * 2, nf * 4, input_nc=None, activation=activation, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(nf, nf * 2, input_nc=None, activation=activation, submodule=unet_block, norm_layer=norm_layer)
+        self.model = UnetSkipConnectionBlock(output_nc, nf, input_nc=input_nc, activation=activation, submodule=unet_block, outermost=True, norm_layer=norm_layer)  # add the outermost layer
 
     def forward(self, input):
         """Standard forward"""
