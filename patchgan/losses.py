@@ -11,7 +11,7 @@ def tversky(y_true, y_pred, beta, batch_mean=True):
     tversky = tp/\
         (tp + beta*fn + (1. - beta)*fp)
     
-    norm = torch.sum(y_true, axis=(1,2,3)) # + torch.sum(y_pred, axis=(1,2,3)) - tp
+    norm = torch.sum(y_true, axis=(1,2,3)) + torch.sum(y_pred, axis=(1,2,3)) - tp
     if batch_mean:
         return torch.mean((1. - tversky)*norm)
     else:
