@@ -95,6 +95,8 @@ class Trainer:
             D_loss_list, G_loss_list = [], []
 
             pbar = tqdm.tqdm(train_data)
+
+            train_data.shuffle()
            
             # loop through the training data
             for (input_img, target_img) in pbar: 
