@@ -43,8 +43,8 @@ class Trainer:
             input_img, target_img = x, y
 
         # conver the input image and mask to tensors
-        input_img = torch.Tensor(input_img).to(device).float()
-        target_img = torch.Tensor(target_img).to(device).float()
+        input_img = torch.Tensor(input_img).to(device)
+        target_img = torch.Tensor(target_img).to(device)
         
         # generate the image mask
         generated_image = self.generator(input_img)
@@ -65,7 +65,7 @@ class Trainer:
         self.gen_optimizer.step()
         
         # Train the discriminator
-        disc_inp_fake = torch.cat((input_img, generated_image), 1).to(device).float()
+        disc_inp_fake = torch.cat((input_img, generated_image), 1)
         disc_inp_real = torch.cat((input_img, target_img), 1)
 
         output = self.discriminator(disc_inp_real)
@@ -74,7 +74,7 @@ class Trainer:
         D_fake_loss  = discriminator_loss(D_fake, fake_target)
         D_real_loss  = discriminator_loss(output,  real_target)
 
-        D_total_loss = (D_real_loss + D_fake_loss) / 2
+        D_total_loss = D_real_loss + D_fake_loss
         
         self.disc_optimizer.zero_grad()
         D_total_loss.backward()
@@ -119,6 +119,8 @@ class Trainer:
         
         D_fake_loss  = discriminator_loss(D_fake, fake_target)
         D_real_loss  = discriminator_loss(output,  real_target)
+        
+        D_total_loss = D_real_loss + D_fake_loss
 
         return G_loss.cpu().item(), D_total_loss.cpu().item()
             
