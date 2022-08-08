@@ -29,7 +29,6 @@ class DataGenerator():
         with nc.Dataset(self.nc_file, 'r') as dset:
             imgs = dset.variables['imgs'][batch_indices,:,:,:].astype(float)
             mask = dset.variables['mask'][batch_indices,:,:].astype(float)
-            mask[mask>0] = 1
 
         return imgs.data, np.expand_dims(mask.data, axis=1)
 
@@ -37,7 +36,6 @@ class DataGenerator():
         with nc.Dataset(self.nc_file, 'r') as dset:
             imgs = dset.variables['imgs'][indices,:,:,:].astype(float)/255.
             mask = dset.variables['mask'][indices,:,:].astype(float)
-            mask[mask>0] = 1
 
         return imgs, mask
 

@@ -16,7 +16,7 @@ class Trainer:
         which calls the train_batch method
     '''
 
-    def __init__(self, generator, discriminator, savefolder):
+    def __init__(self, generator, discriminator, savefolder, crop=True):
         '''
             Store the generator and discriminator info
         '''
@@ -27,6 +27,9 @@ class Trainer:
         if not os.path.exists(savefolder):
             os.mkdir(savefolder)
 
+        # flag for cropping the data to the right size
+        self.crop = crop
+
 
     def train_batch(self, x, y):
         '''
@@ -34,7 +37,10 @@ class Trainer:
         '''
 
         # crop the batch randomly to 256x256
-        input_img, target_img = crop_images_batch(x, y)
+        if self.crop:
+            input_img, target_img = crop_images_batch(x, y)
+        else:
+            input_img, target_img = x, y
 
         # conver the input image and mask to tensors
         input_img = torch.Tensor(input_img).to(device).float()
@@ -82,7 +88,10 @@ class Trainer:
         '''
 
         # crop the batch randomly to 256x256
-        input_img, target_img = crop_images_batch(x, y)
+        if self.crop:
+            input_img, target_img = crop_images_batch(x, y)
+        else:
+            input_img, target_img = x, y
 
         # conver the input image and mask to tensors
         input_img = torch.Tensor(input_img).to(device).float()
