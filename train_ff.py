@@ -7,18 +7,23 @@ import tqdm
 from patchgan import *
 
 # nc_file = './data/FloatingForest/data/trainval.nc'
-nc_file = '../shuffled_data_b_cropped/train_aug.nc'
+mmap_imgs = '../shuffled_data_b_cropped/train_aug_imgs.npy'
+mmap_mask = '../shuffled_data_b_cropped/train_aug_mask.npy'
 batch_size= 48
-traindata = DataGenerator(nc_file, batch_size)
+traindata = MmapDataGenerator(mmap_imgs, mmap_mask, batch_size)
+
+for i, (x, y) in enumerate(tqdm.tqdm(traindata)):
+    pass
 
 # nc_file_val = './data/FloatingForest/data/test.nc'
-nc_file_val = '../shuffled_data_b_cropped/valid_aug.nc'
+mmap_imgs_val = '../shuffled_data_b_cropped/valid_aug_imgs.npy'
+mmap_mask_val = '../shuffled_data_b_cropped/valid_aug_mask.npy'
 batch_size= 48
-val_dl = DataGenerator(nc_file_val, batch_size)
+val_dl = MmapDataGenerator(mmap_imgs_val, mmap_mask_val, batch_size)
 
 
-GEN_FILTS  = 64
-DISC_FILTS = 16
+GEN_FILTS  = 32
+DISC_FILTS = 32
 ACTIV      = 'tanh'
 
 # create the generator
@@ -37,6 +42,12 @@ summary(generator, [1, 4, 256, 256])
 # create the training object and start training
 trainer = Trainer(generator, discriminator, 
                   f'checkpoints-{GEN_FILTS}-{DISC_FILTS}-{ACTIV}/', crop=False)
+
+try:
+    trainer.load_last_checkpoint()
+except Exception as e:
+    raise(e)
+
 G_loss_plot, D_loss_plot = trainer.train(traindata, val_dl, 200, learning_rate=1.e-3)
         
 # save the loss history
