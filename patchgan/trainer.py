@@ -32,6 +32,7 @@ class Trainer:
         self.crop = crop
 
         self.start = 1
+        
 
 
     def train_batch(self, x, y):
@@ -52,9 +53,6 @@ class Trainer:
         # generate the image mask
         generated_image = self.generator(input_img)
         
-        # create the output data for the discriminator
-        real_target = Variable(torch.ones(input_img.size(0), 1, 30, 30).to(device))
-        fake_target = Variable(torch.zeros(input_img.size(0), 1, 30, 30).to(device))
         
         # Train generator with real labels
         fake_gen = torch.cat((input_img, generated_image), 1)
@@ -71,11 +69,11 @@ class Trainer:
         disc_inp_fake = torch.cat((input_img, generated_image), 1)
         disc_inp_real = torch.cat((input_img, target_img), 1)
 
-        output = self.discriminator(disc_inp_real)
+        D_real = self.discriminator(disc_inp_real)
         D_fake = self.discriminator(disc_inp_fake.detach())
         
-        D_fake_loss  = discriminator_loss(D_fake, fake_target)
-        D_real_loss  = discriminator_loss(output,  real_target)
+        D_fake_loss  = discriminator_loss(D_fake, self.fake_target_train)
+        D_real_loss  = discriminator_loss(D_real,  self.real_target_train)
 
         D_total_loss = D_real_loss + D_fake_loss
         
@@ -83,7 +81,7 @@ class Trainer:
         D_total_loss.backward()
         self.disc_optimizer.step()
 
-        return G_loss.cpu().item(), D_total_loss.cpu().item()
+        return G_loss, D_total_loss
     
     def test_batch(self, x, y):
         '''
@@ -103,10 +101,6 @@ class Trainer:
         # generate the image mask
         generated_image = self.generator(input_img)
         
-        # create the output data for the discriminator
-        real_target = Variable(torch.ones(input_img.size(0), 1, 30, 30).to(device))
-        fake_target = Variable(torch.zeros(input_img.size(0), 1, 30, 30).to(device))
-        
         # Train generator with real labels
         fake_gen = torch.cat((input_img, generated_image), 1)
         
@@ -117,11 +111,11 @@ class Trainer:
         disc_inp_fake = torch.cat((input_img, generated_image), 1)
         disc_inp_real = torch.cat((input_img, target_img), 1)
 
-        output = self.discriminator(disc_inp_real)
+        D_real = self.discriminator(disc_inp_real)
         D_fake = self.discriminator(disc_inp_fake.detach())
         
-        D_fake_loss  = discriminator_loss(D_fake, fake_target)
-        D_real_loss  = discriminator_loss(output,  real_target)
+        D_fake_loss  = discriminator_loss(D_fake, self.fake_target_val)
+        D_real_loss  = discriminator_loss(D_real,  self.real_target_val)
         
         D_total_loss = D_real_loss + D_fake_loss
 
@@ -138,6 +132,13 @@ class Trainer:
         self.gen_optimizer  = optim.Adam(self.generator.parameters(), lr = learning_rate)#, betas=(0.5, 0.999))
         self.disc_optimizer = optim.Adam(self.discriminator.parameters(), lr = learning_rate)#, betas=(0.5, 0.999))
 
+        # create the output data for the discriminator
+        self.real_target_train = torch.ones(train_data.batch_size, 1, 30, 30).to(device)
+        self.fake_target_train = torch.zeros(train_data.batch_size, 1, 30, 30).to(device)
+        
+        self.real_target_val = torch.ones(val_data.batch_size, 1, 30, 30).to(device)
+        self.fake_target_val = torch.zeros(val_data.batch_size, 1, 30, 30).to(device)
+
         # empty lists for storing epoch loss data
         D_loss_plot, G_loss_plot = [], []
         for epoch in range(self.start, epochs+1): 
@@ -151,22 +152,23 @@ class Trainer:
             self.generator.train()
             self.discriminator.train()
 
-            D_loss_list, G_loss_list = [], []
+            D_loss_list = torch.zeros(len(train_data)).to(device)
+            G_loss_list = torch.zeros(len(train_data)).to(device)
             # loop through the training data
-            for (input_img, target_img) in pbar: 
+            for i, (input_img, target_img) in enumerate(pbar): 
                 
                 # train on this batch
                 gen_loss, disc_loss = self.train_batch(input_img, target_img)
 
                 # append the current batch loss
-                D_loss_list.append(disc_loss)
-                G_loss_list.append(gen_loss)
+                D_loss_list[i] = disc_loss.item()
+                G_loss_list[i] = gen_loss.item()
 
-                pbar.set_postfix_str(f'gen: {np.mean(G_loss_list):.3e} disc {np.mean(D_loss_list):.3e}')
+                pbar.set_postfix_str(f'gen: {torch.mean(G_loss_list[:i]):.3e} disc {torch.mean(D_loss_list[:i]):.3e}')
                 
             # update the epoch loss
-            D_loss_plot.append(np.mean(D_loss_list))
-            G_loss_plot.append(np.mean(G_loss_list))
+            D_loss_plot.append(torch.mean(D_loss_list).cpu().item())
+            G_loss_plot.append(torch.mean(G_loss_list).cpu().item())
 
 
             if epoch%validation_freq==0:

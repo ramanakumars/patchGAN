@@ -27,10 +27,10 @@ class DataGenerator():
         batch_indices = self.indices[index*self.batch_size:(index+1)*self.batch_size]
 
         with nc.Dataset(self.nc_file, 'r') as dset:
-            imgs = dset.variables['imgs'][batch_indices,:,:,:].astype(float)
+            imgs = dset.variables['imgs'][batch_indices,:,:,:].astype(float)/255
             mask = dset.variables['mask'][batch_indices,:,:].astype(float)
 
-        return imgs.data, np.expand_dims(mask, axis=1)
+        return imgs, np.expand_dims(mask, axis=1)
 
     def get_from_indices(self, indices):
         with nc.Dataset(self.nc_file, 'r') as dset:
