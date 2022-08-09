@@ -47,8 +47,8 @@ class Trainer:
             input_img, target_img = x, y
 
         # conver the input image and mask to tensors
-        input_img = torch.Tensor(input_img).to(device)
-        target_img = torch.Tensor(target_img).to(device)
+        input_img = torch.as_tensor(input_img, dtype=torch.float).to(device)
+        target_img = torch.as_tensor(target_img, dtype=torch.float).to(device)
         
         # generate the image mask
         generated_image = self.generator(input_img)
@@ -71,9 +71,13 @@ class Trainer:
 
         D_real = self.discriminator(disc_inp_real)
         D_fake = self.discriminator(disc_inp_fake.detach())
-        
-        D_fake_loss  = discriminator_loss(D_fake, self.fake_target_train)
-        D_real_loss  = discriminator_loss(D_real,  self.real_target_train)
+ 
+        try:
+            D_fake_loss  = discriminator_loss(D_fake, self.fake_target_train)
+            D_real_loss  = discriminator_loss(D_real,  self.real_target_train)
+        except Exception as e: 
+            D_fake_loss  = discriminator_loss(D_fake, self.fake_target_train[:input_img.shape[0]])
+            D_real_loss  = discriminator_loss(D_real,  self.real_target_train[:input_img.shape[0]])
 
         D_total_loss = D_real_loss + D_fake_loss
         
@@ -114,8 +118,12 @@ class Trainer:
         D_real = self.discriminator(disc_inp_real)
         D_fake = self.discriminator(disc_inp_fake.detach())
         
-        D_fake_loss  = discriminator_loss(D_fake, self.fake_target_val)
-        D_real_loss  = discriminator_loss(D_real,  self.real_target_val)
+        try:
+            D_fake_loss  = discriminator_loss(D_fake, self.fake_target_val)
+            D_real_loss  = discriminator_loss(D_real,  self.real_target_val)
+        except Exception as e: 
+            D_fake_loss  = discriminator_loss(D_fake, self.fake_target_val[:input_img.shape[0]])
+            D_real_loss  = discriminator_loss(D_real,  self.real_target_val[:input_img.shape[0]])
         
         D_total_loss = D_real_loss + D_fake_loss
 
@@ -152,8 +160,8 @@ class Trainer:
             self.generator.train()
             self.discriminator.train()
 
-            D_loss_list = torch.zeros(len(train_data)).to(device)
-            G_loss_list = torch.zeros(len(train_data)).to(device)
+            D_loss_list = torch.zeros(len(train_data)+1).to(device)
+            G_loss_list = torch.zeros(len(train_data)+1).to(device)
             # loop through the training data
             for i, (input_img, target_img) in enumerate(pbar): 
                 
