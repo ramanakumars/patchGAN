@@ -192,7 +192,7 @@ class Trainer:
                 for (input_img, target_img) in pbar: 
                     
                     # train on this batch
-                    gen_loss, disc_loss = self.train_batch(input_img, target_img)
+                    gen_loss, disc_loss = self.test_batch(input_img, target_img)
 
                     # append the current batch loss
                     D_loss_list.append(disc_loss)
