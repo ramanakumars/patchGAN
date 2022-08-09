@@ -3,6 +3,7 @@ from torch import nn
 import numpy as np
 import os
 import tqdm
+import glob
 from torch import optim
 from torch.autograd import Variable
 from .losses import *
@@ -29,6 +30,8 @@ class Trainer:
 
         # flag for cropping the data to the right size
         self.crop = crop
+
+        self.start = 1
 
 
     def train_batch(self, x, y):
@@ -94,8 +97,8 @@ class Trainer:
             input_img, target_img = x, y
 
         # conver the input image and mask to tensors
-        input_img = torch.Tensor(input_img).to(device).float()
-        target_img = torch.Tensor(target_img).to(device).float()
+        input_img = torch.Tensor(input_img).to(device)
+        target_img = torch.Tensor(target_img).to(device)
         
         # generate the image mask
         generated_image = self.generator(input_img)
@@ -111,7 +114,7 @@ class Trainer:
         G_loss = generator_loss(generated_image, target_img)                                 
         
         # Train the discriminator
-        disc_inp_fake = torch.cat((input_img, generated_image), 1).to(device).float()
+        disc_inp_fake = torch.cat((input_img, generated_image), 1)
         disc_inp_real = torch.cat((input_img, target_img), 1)
 
         output = self.discriminator(disc_inp_real)
@@ -137,10 +140,9 @@ class Trainer:
 
         # empty lists for storing epoch loss data
         D_loss_plot, G_loss_plot = [], []
-        for epoch in range(1, epochs+1): 
+        for epoch in range(self.start, epochs+1): 
           
             # batch loss data
-
             pbar = tqdm.tqdm(train_data, desc=f'Epoch {epoch}/{epochs}')
 
             train_data.shuffle()
@@ -193,3 +195,23 @@ class Trainer:
             torch.save(self.discriminator.state_dict(), f'{self.savefolder}/discriminator_epoch_{epoch}.pth')
 
         return G_loss_plot, D_loss_plot
+
+    def load_last_checkpoint(self):
+        gen_checkpoints  = sorted(glob.glob(self.savefolder+"generator_epoch*.pth"))
+        disc_checkpoints = sorted(glob.glob(self.savefolder+"discriminator_epoch*.pth"))
+
+        gen_epochs = set([int(ch.split('/')[-1].replace('generator_epoch_','')[:-4]) for ch in gen_checkpoints])
+        dsc_epochs = set([int(ch.split('/')[-1].replace('discriminator_epoch_','')[:-4]) for ch in disc_checkpoints])
+
+        self.start = max(gen_epochs.union(dsc_epochs))
+
+        assert len(gen_epochs) > 0, "No checkpoints found!"
+
+        self.load(f"{self.savefolder}/generator_epoch_{self.start}.pth", f"{self.savefolder}/discriminator_epoch_{self.start}.pth")
+
+    def load(self, generator_save, discriminator_save):
+        print(generator_save, discriminator_save)
+        self.generator.load_state_dict(torch.load(generator_save))
+        self.discriminator.load_state_dict(torch.load(discriminator_save))
+
+        print(f"Loaded checkpoints from {generator_save.split('/')[-1]} and {discriminator_save.split('/')[-1]}")
