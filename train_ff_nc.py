@@ -6,17 +6,13 @@ from torchinfo import summary
 import tqdm
 from patchgan import *
 
-# nc_file = './data/FloatingForest/data/trainval.nc'
-mmap_imgs = '../shuffled_data_b_cropped/train_aug_imgs.npy'
-mmap_mask = '../shuffled_data_b_cropped/train_aug_mask.npy'
+nc_file = './data/FloatingForest/data/trainval.nc'
 batch_size= 48
-traindata = MmapDataGenerator(mmap_imgs, mmap_mask, batch_size)
+traindata = DataGenerator(nc_file, batch_size)
 
-# nc_file_val = './data/FloatingForest/data/test.nc'
-mmap_imgs_val = '../shuffled_data_b_cropped/valid_aug_imgs.npy'
-mmap_mask_val = '../shuffled_data_b_cropped/valid_aug_mask.npy'
+nc_file_val = './data/FloatingForest/data/test.nc'
 batch_size= 48
-val_dl = MmapDataGenerator(mmap_imgs_val, mmap_mask_val, batch_size)
+val_dl = DataGenerator(nc_file, batch_size)
 
 
 GEN_FILTS  = 32
@@ -49,3 +45,4 @@ G_loss_plot, D_loss_plot = trainer.train(traindata, val_dl, 200, learning_rate=1
         
 # save the loss history
 np.savez('loss_history.npz', D_loss = D_loss_plot ,G_loss = G_loss_plot)
+
