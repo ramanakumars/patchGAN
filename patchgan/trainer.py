@@ -5,7 +5,7 @@ import os
 import tqdm
 import glob
 from torch import optim
-from torch.autograd import Variable
+from torch.optim.lr_scheduler import ExponentialLR
 from .losses import *
 from .utils import crop_images_batch
 
@@ -130,15 +130,47 @@ class Trainer:
         return G_loss.cpu().item(), D_total_loss.cpu().item()
             
 
-    def train(self, train_data, val_data, epochs, learning_rate=2.e-4, validation_freq=5):
+    def train(self, train_data, val_data, epochs, dsc_learning_rate=1.e-4, gen_learning_rate=1.e-3, 
+              validation_freq=5, save_freq=10, lr_decay=None, decay_freq=5):
         '''
             Training driver which loads the optimizer and calls the `train_batch`
             method. Also handles checkpoint saving
+
+            Inputs
+            ------
+            train_data : DataLoader object
+                Training data that is mapped using the DataLoader or MmapDataLoader object
+                defined in patchgan/io.py
+            val_data : DataLoader object
+                Validation data loaded in using the DataLoader or MmapDataLoader object
+            epochs : int
+                Number of epochs to run the model
+            dsc_learning_rate : float [default: 1e-4]
+                Initial learning rate for the discriminator
+            gen_learning_rate : float [default: 1e-3]
+                Initial learning rate for the generator
+            validation_freq : int [default: 5]
+                Frequency at which to validate the model using the validation data
+            save_freq : int [default: 10]
+                Frequency at which to save checkpoints to the save folder
+            lr_decay : float [default: None]
+                Learning rate decay rate (ratio of new learning rate to previous). 
+                A value of 0.95, for example, would set the new LR to 95% of the previous value
+            decay_freq : int [default: 5]
+                Frequency at which to decay the learning rate. For example, a value of for decay_freq
+                and 0.95 for lr_decay would decay the learning to 95% of the current value every 5 epochs.
+
+            Outputs
+            -------
+            G_loss_plot : numpy.ndarray
+                Generator loss history as a function of the epochs
+            D_loss_plot : numpy.ndarray
+                Discriminator loss history as a function of the epochs
         '''
 
         # create the Adam optimzers
-        self.gen_optimizer  = optim.Adam(self.generator.parameters(), lr = learning_rate)#, betas=(0.5, 0.999))
-        self.disc_optimizer = optim.Adam(self.discriminator.parameters(), lr = learning_rate)#, betas=(0.5, 0.999))
+        self.gen_optimizer  = optim.Adam(self.generator.parameters(), lr = gen_learning_rate)#, betas=(0.5, 0.999))
+        self.disc_optimizer = optim.Adam(self.discriminator.parameters(), lr = dsc_learning_rate)#, betas=(0.5, 0.999))
 
         # create the output data for the discriminator
         self.real_target_train = torch.ones(train_data.batch_size, 1, 30, 30).to(device)
@@ -147,12 +179,29 @@ class Trainer:
         self.real_target_val = torch.ones(val_data.batch_size, 1, 30, 30).to(device)
         self.fake_target_val = torch.zeros(val_data.batch_size, 1, 30, 30).to(device)
 
+        # set up the learning rate scheduler with exponential lr decay
+        if lr_decay is not None:
+            gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
+            dsc_scheduler = ExponentialLR(self.disc_optimizer, gamma=lr_decay)
+        else:
+            gen_scheduler = None
+            dsc_scheduler = None
+
         # empty lists for storing epoch loss data
         D_loss_plot, G_loss_plot = [], []
         for epoch in range(self.start, epochs+1): 
+
+            if (gen_scheduler is not None)&(dsc_scheduler is not None):
+                gen_lr = gen_scheduler.get_last_lr()[0]
+                dsc_lr = dsc_scheduler.get_last_lr()[0]
+            else:
+                gen_lr = gen_learning_rate
+                dsc_lr = dsc_learning_rate
           
+            print(f"Epoch {epoch} -- Learning rate: {gen_lr:5.3e}, {dsc_lr:5.3e}\n-------------------------------------------------------")
+
             # batch loss data
-            pbar = tqdm.tqdm(train_data, desc=f'Epoch {epoch}/{epochs}')
+            pbar = tqdm.tqdm(train_data, desc=f'Training: ')
 
             train_data.shuffle()
            
@@ -183,7 +232,7 @@ class Trainer:
                 # validate every `validation_freq` epochs
                 self.discriminator.eval()
                 self.generator.eval()
-                pbar = tqdm.tqdm(val_data, desc=f'Epoch {epoch} validation')
+                pbar = tqdm.tqdm(val_data, desc=f'Validation: ')
 
                 val_data.shuffle()
                
@@ -200,11 +249,26 @@ class Trainer:
 
                     pbar.set_postfix_str(f'gen: {np.mean(G_loss_list):.3e} disc {np.mean(D_loss_list):.3e}')
              
+
+            # apply learning rate decay
+            if (gen_scheduler is not None)&(dsc_scheduler is not None):
+                if epoch%decay_freq==0:
+                    lr_gen = gen_scheduler.step()
+                    lr_dsc = dsc_scheduler.step()
+
             # save checkpoints
-            torch.save(self.generator.state_dict(), f'{self.savefolder}/generator_epoch_{epoch}.pth')
-            torch.save(self.discriminator.state_dict(), f'{self.savefolder}/discriminator_epoch_{epoch}.pth')
+            if epoch%save_freq == 0:
+                self.save(epoch)
 
         return G_loss_plot, D_loss_plot
+
+    def save(self, epoch):
+        gen_savefile  = f'{self.savefolder}/generator_epoch_{epoch:03d}.pth'
+        disc_savefile = f'{self.savefolder}/discriminator_epoch_{epoch:03d}.pth'
+
+        print(f"Saving to {gen_savefile} and {disc_savefile}")
+        torch.save(self.generator.state_dict(), gen_savefile)
+        torch.save(self.discriminator.state_dict(), disc_savefile)
 
     def load_last_checkpoint(self):
         gen_checkpoints  = sorted(glob.glob(self.savefolder+"generator_epoch*.pth"))
