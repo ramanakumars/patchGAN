@@ -37,6 +37,6 @@ def generator_loss(generated_img, target_img):
     return gen_loss
 
 def discriminator_loss(output, label):
-    disc_loss = 350*adversarial_loss(output, label)
+    disc_loss = adversarial_loss(output, label)
     return disc_loss
 
