@@ -18,9 +18,9 @@ mmap_mask_val = '../shuffled_data_b_cropped/valid_aug_mask.npy'
 batch_size= 48
 val_dl = MmapDataGenerator(mmap_imgs_val, mmap_mask_val, batch_size)
 
-GEN_FILTS  = 32
+GEN_FILTS  = 64
 DISC_FILTS = 32
-ACTIV      = 'tanh'
+ACTIV      = 'relu'
 
 # create the generator
 norm_layer = get_norm_layer()
@@ -39,7 +39,7 @@ summary(generator, [1, 4, 256, 256])
 trainer = Trainer(generator, discriminator, 
                   f'checkpoints-{GEN_FILTS}-{DISC_FILTS}-{ACTIV}/', crop=False)
 
-G_loss_plot, D_loss_plot = trainer.train(traindata, val_dl, 200, gen_learning_rate=1.e-3, 
+G_loss_plot, D_loss_plot = trainer.train(traindata, val_dl, 200, gen_learning_rate=5.e-4, 
                                         dsc_learning_rate=1.e-4, lr_decay=0.95)
         
 # save the loss history
