@@ -1,6 +1,7 @@
 import torch
 import functools
 from torch import nn
+from torch.nn.parameter import Parameter
 import torchvision
 import numpy as np
 
@@ -148,6 +149,18 @@ class Discriminator(nn.Module):
     def forward(self, input):
         """Standard forward."""
         return self.model(input)
+    
+    def load_transfer_data(self, state_dict):
+        own_state = self.state_dict()
+        for name, param in state_dict.items():
+            print(f"Loading {name}")
+            if name not in own_state:
+                 continue
+            if isinstance(param, Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            if param.shape == own_state[name].data.shape:
+                own_state[name].copy_(param)
 
 
 
@@ -195,3 +208,14 @@ class UnetGenerator(nn.Module):
         """Standard forward"""
         return self.model(input)
 
+    def load_transfer_data(self, state_dict):
+        own_state = self.state_dict()
+        for name, param in state_dict.items():
+            print(f"Loading {name}")
+            if name not in own_state:
+                 continue
+            if isinstance(param, Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            if param.shape == own_state[name].data.shape:
+                own_state[name].copy_(param)
