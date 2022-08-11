@@ -211,11 +211,11 @@ class UnetGenerator(nn.Module):
     def load_transfer_data(self, state_dict):
         own_state = self.state_dict()
         for name, param in state_dict.items():
-            print(f"Loading {name}")
             if name not in own_state:
                  continue
             if isinstance(param, Parameter):
                 # backwards compatibility for serialized parameters
                 param = param.data
             if param.shape == own_state[name].data.shape:
+                print(f"Loading {name}")
                 own_state[name].copy_(param)
