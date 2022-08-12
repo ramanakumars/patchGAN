@@ -68,7 +68,14 @@ class UnetSkipConnectionBlock(nn.Module):
                                 (f'DownNorm{layer}', downnorm)])
             up = OrderedDict([(f'UpConv{layer}', upconv), 
                               (f'UpAct{layer}', nn.Sigmoid())]) ##
-            model = OrderedDict(chain(down.items(), [(f'SubModule{layer}', submodule)], up.items()))#down + [submodule] + up
+            if use_dropout:
+                model = OrderedDict(chain(down.items(), 
+                                          [(f'SubModule{layer}', submodule)],
+                                          up.items()))
+            else:
+                model = OrderedDict(chain(down.items(),
+                                          [(f'SubModule{layer}',
+                                            submodule)], up.items()))#down + [submodule] + up
         elif innermost:
             upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
                                         kernel_size=4, stride=2,
@@ -81,7 +88,8 @@ class UnetSkipConnectionBlock(nn.Module):
             up = OrderedDict([(f'UpConv{layer}', upconv), 
                               (f'UpAct{layer}', upact),
                               (f'UpNorm{layer}', upnorm)]) ##
-            model = OrderedDict(chain(down.items(), up.items()))#down + [submodule] + up
+            model = OrderedDict(chain(down.items(),
+                                      up.items()))#down + [submodule] + up
         else:
             upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
@@ -96,10 +104,15 @@ class UnetSkipConnectionBlock(nn.Module):
                               (f'UpNorm{layer}', upnorm)]) ##
 
             if use_dropout:
-                model = down + [submodule] + up + [nn.Dropout(0.5)]
+                model = OrderedDict(chain(down.items(),
+                                          [(f'SubModule{layer}', submodule)],
+                                          up.items(),
+                                          [(f'Dropout{layer}', nn.Dropout(0.5))]))
             else:
                 #model = down + [submodule] + up
-                model = OrderedDict(chain(down.items(), [(f'SubModule{layer}', submodule)], up.items()))#down + [submodule] + up
+                model = OrderedDict(chain(down.items(),
+                                          [(f'SubModule{layer}', submodule)],
+                                          up.items()))#down + [submodule] + up
 
 
         self.model = nn.Sequential(model)
@@ -235,4 +248,3 @@ class UnetGenerator(nn.Module, Transferable):
     def forward(self, input):
         """Standard forward"""
         return self.model(input)
-
