@@ -105,9 +105,10 @@ class UnetSkipConnectionBlock(nn.Module):
 
             if use_dropout:
                 model = OrderedDict(chain(down.items(),
+                                          [(f'EncDropout{layer}', nn.Dropout(0.5))],
                                           [(f'SubModule{layer}', submodule)],
                                           up.items(),
-                                          [(f'Dropout{layer}', nn.Dropout(0.5))]))
+                                          [(f'DecDropout{layer}', nn.Dropout(0.5))]))
             else:
                 #model = down + [submodule] + up
                 model = OrderedDict(chain(down.items(),
