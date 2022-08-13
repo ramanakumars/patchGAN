@@ -31,9 +31,7 @@ class Trainer:
         # flag for cropping the data to the right size
         self.crop = crop
 
-        self.start = 1
-        
-
+        self.start = 0
 
     def train_batch(self, x, y):
         '''
@@ -79,7 +77,7 @@ class Trainer:
             D_fake_loss  = discriminator_loss(D_fake, self.fake_target_train[:input_img.shape[0]])
             D_real_loss  = discriminator_loss(D_real,  self.real_target_train[:input_img.shape[0]])
 
-        D_total_loss = D_real_loss + D_fake_loss
+        D_total_loss = (D_real_loss + D_fake_loss)/2
         
         self.disc_optimizer.zero_grad()
         D_total_loss.backward()
@@ -125,7 +123,7 @@ class Trainer:
             D_fake_loss  = discriminator_loss(D_fake, self.fake_target_val[:input_img.shape[0]])
             D_real_loss  = discriminator_loss(D_real,  self.real_target_val[:input_img.shape[0]])
         
-        D_total_loss = D_real_loss + D_fake_loss
+        D_total_loss = (D_real_loss + D_fake_loss)/2
 
         return G_loss.cpu().item(), D_total_loss.cpu().item()
             
@@ -189,7 +187,7 @@ class Trainer:
 
         # empty lists for storing epoch loss data
         D_loss_plot, G_loss_plot = [], []
-        for epoch in range(self.start, epochs+1): 
+        for epoch in range(self.start+1, epochs+1): 
 
             if (gen_scheduler is not None)&(dsc_scheduler is not None):
                 gen_lr = gen_scheduler.get_last_lr()[0]
@@ -277,15 +275,19 @@ class Trainer:
         gen_epochs = set([int(ch.split('/')[-1].replace('generator_epoch_','')[:-4]) for ch in gen_checkpoints])
         dsc_epochs = set([int(ch.split('/')[-1].replace('discriminator_epoch_','')[:-4]) for ch in disc_checkpoints])
 
-        self.start = max(gen_epochs.union(dsc_epochs))
-
         assert len(gen_epochs) > 0, "No checkpoints found!"
+        epoch = max(list(gen_epochs.union(dsc_epochs)))
 
-        self.load(f"{self.savefolder}/generator_epoch_{self.start}.pth", f"{self.savefolder}/discriminator_epoch_{self.start}.pth")
+        self.load(f"{self.savefolder}generator_epoch_{epoch:03d}.pth",
+                  f"{self.savefolder}discriminator_epoch_{epoch:03d}.pth", epoch)
 
-    def load(self, generator_save, discriminator_save):
-        print(generator_save, discriminator_save)
-        self.generator.load_state_dict(torch.load(generator_save))
-        self.discriminator.load_state_dict(torch.load(discriminator_save))
+    def load(self, generator_save, discriminator_save, epoch):
+        try:
+            self.generator.load_state_dict(torch.load(generator_save), strict=False)
+            self.discriminator.load_state_dict(torch.load(discriminator_save), strict=False)
+        except Exception as e:
+            print(e)
+
+        self.start = epoch 
 
         print(f"Loaded checkpoints from {generator_save.split('/')[-1]} and {discriminator_save.split('/')[-1]}")
