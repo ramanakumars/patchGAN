@@ -18,7 +18,6 @@ class Transferable():
                 # backwards compatibility for serialized parameters
                 param = param.data
             if param.shape == own_state[name].data.shape:
-                print(f"Loading {own_state[name]}")
                 own_state[name].copy_(param)
 
 

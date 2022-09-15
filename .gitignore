@@ -130,3 +130,5 @@ dmypy.json
 
 # pytorch checkpoints
 *.pth
+*.npz
+*.png
