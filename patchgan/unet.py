@@ -1,8 +1,25 @@
 import torch
 import functools
 from torch import nn
+from torch.nn.parameter import Parameter
 import torchvision
+from collections import OrderedDict
+from itertools import chain
 import numpy as np
+
+class Transferable():
+    def __init__(self):
+        super(Transferable, self).__init__()
+
+    def load_transfer_data(self, state_dict):
+        own_state = self.state_dict()
+        for name, param in state_dict.items():
+            if isinstance(param, Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            if param.shape == own_state[name].data.shape:
+                own_state[name].copy_(param)
+
 
 class UnetSkipConnectionBlock(nn.Module):
     """Defines the Unet submodule with skip connection.
@@ -12,7 +29,7 @@ class UnetSkipConnectionBlock(nn.Module):
 
     def __init__(self, outer_nc, inner_nc, input_nc=None,
                  submodule=None, outermost=False, innermost=False, 
-                 activation='tanh', norm_layer=nn.BatchNorm2d, use_dropout=False):
+                 activation='tanh', norm_layer=nn.BatchNorm2d, use_dropout=False, layer=1):
         """Construct a Unet submodule with skip connections.
         Parameters:
             outer_nc (int) -- the number of filters in the outer conv layer
@@ -45,29 +62,60 @@ class UnetSkipConnectionBlock(nn.Module):
             upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1)
-            down = [downconv, downact, downnorm]
-            up = [upconv, nn.Sigmoid()] ##
-            model = down + [submodule] + up
+            down = OrderedDict([(f'DownConv{layer}', downconv), 
+                                (f'DownAct{layer}', downact),
+                                (f'DownNorm{layer}', downnorm)])
+            up = OrderedDict([(f'UpConv{layer}', upconv), 
+                              (f'UpAct{layer}', nn.Sigmoid())]) ##
+            if use_dropout:
+                model = OrderedDict(chain(down.items(), 
+                                          [(f'SubModule{layer}', submodule)],
+                                          up.items()))
+            else:
+                model = OrderedDict(chain(down.items(),
+                                          [(f'SubModule{layer}',
+                                            submodule)], up.items()))#down + [submodule] + up
         elif innermost:
             upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1, bias=False)
-            down = [downconv, downact]
-            up = [upconv, upact, upnorm]
-            model = down + up
+            #down = [downconv, downact]
+            #up = [upconv, upact, upnorm]
+            #model = down + up
+            down = OrderedDict([(f'DownConv{layer}', downconv), 
+                                (f'DownAct{layer}', downact)])
+            up = OrderedDict([(f'UpConv{layer}', upconv), 
+                              (f'UpAct{layer}', upact),
+                              (f'UpNorm{layer}', upnorm)]) ##
+            model = OrderedDict(chain(down.items(),
+                                      up.items()))#down + [submodule] + up
         else:
             upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1, bias=False)
-            down = [downconv, downact, downnorm]
-            up = [upconv, upact, upnorm]
+            #down = [downconv, downact, downnorm]
+            #up = [upconv, upact, upnorm]
+            down = OrderedDict([(f'DownConv{layer}', downconv), 
+                                (f'DownAct{layer}', downact),
+                                (f'DownNorm{layer}', downnorm)])
+            up = OrderedDict([(f'UpConv{layer}', upconv), 
+                              (f'UpAct{layer}', upact),
+                              (f'UpNorm{layer}', upnorm)]) ##
 
             if use_dropout:
-                model = down + [submodule] + up + [nn.Dropout(0.5)]
+                model = OrderedDict(chain(down.items(),
+                                          [(f'EncDropout{layer}', nn.Dropout(0.5))],
+                                          [(f'SubModule{layer}', submodule)],
+                                          up.items(),
+                                          [(f'DecDropout{layer}', nn.Dropout(0.5))]))
             else:
-                model = down + [submodule] + up
+                #model = down + [submodule] + up
+                model = OrderedDict(chain(down.items(),
+                                          [(f'SubModule{layer}', submodule)],
+                                          up.items()))#down + [submodule] + up
 
-        self.model = nn.Sequential(*model)
+
+        self.model = nn.Sequential(model)
 
     def forward(self, x):
         if self.outermost:
@@ -108,7 +156,7 @@ def weights_init(net, init_type='normal', scaling=0.02):
     net.apply(init_func)  # apply the initialization function <init_func>
     
 
-class Discriminator(nn.Module):
+class Discriminator(nn.Module, Transferable):
     """Defines a PatchGAN discriminator"""
 
     def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d):
@@ -148,10 +196,11 @@ class Discriminator(nn.Module):
     def forward(self, input):
         """Standard forward."""
         return self.model(input)
+    
 
 
 
-class UnetGenerator(nn.Module):
+class UnetGenerator(nn.Module, Transferable):
     """Create a Unet-based generator"""
 
     def __init__(self, input_nc, output_nc, nf=64, 
@@ -172,26 +221,30 @@ class UnetGenerator(nn.Module):
         # construct unet structure
         unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, 
                                              activation=activation, submodule=None, 
-                                             norm_layer=norm_layer, innermost=True)  # add the innermost layer
+                                             norm_layer=norm_layer, innermost=True, layer=8)  # add the innermost layer
         
         # add intermediate layers with ngf * 8 filters
         unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
                                              submodule=unet_block, norm_layer=norm_layer, 
-                                             use_dropout=use_dropout)
+                                             use_dropout=use_dropout, layer=7)
         unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
                                              submodule=unet_block, norm_layer=norm_layer,
-                                             use_dropout=use_dropout)
+                                             use_dropout=use_dropout, layer=6)
         unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
                                              submodule=unet_block, norm_layer=norm_layer,
-                                             use_dropout=use_dropout)
+                                             use_dropout=use_dropout, layer=5)
         
         # gradually reduce the number of filters from nf * 8 to nf
-        unet_block = UnetSkipConnectionBlock(nf * 4, nf * 8, input_nc=None, activation=activation, submodule=unet_block, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock(nf * 2, nf * 4, input_nc=None, activation=activation, submodule=unet_block, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock(nf, nf * 2, input_nc=None, activation=activation, submodule=unet_block, norm_layer=norm_layer)
-        self.model = UnetSkipConnectionBlock(output_nc, nf, input_nc=input_nc, activation=activation, submodule=unet_block, outermost=True, norm_layer=norm_layer)  # add the outermost layer
+        unet_block = UnetSkipConnectionBlock(nf * 4, nf * 8, input_nc=None, activation=activation,
+                                             submodule=unet_block, norm_layer=norm_layer, layer=4)
+        unet_block = UnetSkipConnectionBlock(nf * 2, nf * 4, input_nc=None, activation=activation,
+                                             submodule=unet_block, norm_layer=norm_layer, layer=3)
+        unet_block = UnetSkipConnectionBlock(nf, nf * 2, input_nc=None, activation=activation, 
+                                             submodule=unet_block, norm_layer=norm_layer, layer=2)
+        self.model = UnetSkipConnectionBlock(output_nc, nf, input_nc=input_nc, activation=activation,
+                                             submodule=unet_block, outermost=True,
+                                             norm_layer=norm_layer, layer=1)  # add the outermost layer
 
     def forward(self, input):
         """Standard forward"""
         return self.model(input)
-
