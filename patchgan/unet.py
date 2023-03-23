@@ -10,9 +10,11 @@ class Transferable():
     def __init__(self):
         super(Transferable, self).__init__()
 
-    def load_transfer_data(self, state_dict, verbose=False):
+    def load_transfer_data(self, checkpoint, verbose=False):
+        state_dict = torch.load(checkpoint, map_location=next(self.parameters()).device)
         own_state = self.state_dict()
         state_names = list(own_state.keys())
+        count = 0
         for name, param in state_dict.items():
             if isinstance(param, Parameter):
                 # backwards compatibility for serialized parameters
@@ -30,6 +32,12 @@ class Transferable():
 
             if param.shape == own_state[own_state_name].data.shape:
                 own_state[own_state_name].copy_(param)
+                count += 1
+
+        if count == 0:
+            print("WARNING: Could not transfer over any weights!")
+        else:
+            print(f"Loaded weights for {count} layers")
 
 
 class UnetSkipConnectionBlock(nn.Module):
@@ -187,14 +195,11 @@ class UnetGenerator(nn.Module, Transferable):
         """
         super(UnetGenerator, self).__init__()
         # construct unet structure
-        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None,
-                                             activation=activation, submodule=None,
-                                             norm_layer=norm_layer, innermost=True, layer=8)  # add the innermost layer
+        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
+                                             submodule=None, norm_layer=norm_layer,
+                                             use_dropout=use_dropout, innermost=True, layer=7)
 
         # add intermediate layers with ngf * 8 filters
-        unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
-                                             submodule=unet_block, norm_layer=norm_layer,
-                                             use_dropout=use_dropout, layer=7)
         unet_block = UnetSkipConnectionBlock(nf * 8, nf * 8, input_nc=None, activation=activation,
                                              submodule=unet_block, norm_layer=norm_layer,
                                              use_dropout=use_dropout, layer=6)
@@ -293,7 +298,7 @@ class UNet(nn.Module, Transferable):
         kernel_size = 4
         padding = 1
 
-        conv_filts = [nf, nf * 2, nf * 4, nf * 8, nf * 8, nf * 8, nf * 8, nf * 8]
+        conv_filts = [nf, nf * 2, nf * 4, nf * 8, nf * 8, nf * 8, nf * 8]
 
         encoder_layers = []
 
