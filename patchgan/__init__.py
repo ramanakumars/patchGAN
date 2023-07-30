@@ -1,5 +1,7 @@
-from .unet import *
-from .io import *
-from .losses import *
-from .utils import *
+from .unet import UNet
+from .disc import Discriminator
 from .trainer import Trainer
+
+__all__ = [
+    'UNet', 'Discriminator', 'Trainer'
+]

@@ -2,35 +2,15 @@ import torch
 import os
 import tqdm
 import glob
+import numpy as np
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
-from .losses import fc_tversky, adv_loss
+from .losses import fc_tversky, bce_loss
+from torch.nn.functional import binary_cross_entropy
 from collections import defaultdict
-import numpy as np
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-
-# custom weights initialization called on generator and discriminator
-# scaling here means std
-def weights_init(net, init_type='normal', scaling=0.02):
-    """Initialize network weights.
-    Parameters:
-        net (network)   -- network to be initialized
-        init_type (str) -- the name of an initialization method: normal | xavier | kaiming | orthogonal
-        init_gain (float)    -- scaling factor for normal, xavier and orthogonal.
-    We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
-    work better for some applications. Feel free to try yourself.
-    """
-    def init_func(m):  # define the initialization function
-        classname = m.__class__.__name__
-        if hasattr(m, 'weight') and (classname.find('Conv')) != -1:
-            torch.nn.init.normal_(m.weight.data, 0.0, scaling)
-        # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
-        elif classname.find('BatchNorm') != -1:
-            torch.nn.init.normal_(m.weight.data, 1.0, scaling)
-            torch.nn.init.constant_(m.bias.data, 0.0)
 
 
 class Trainer:
@@ -38,13 +18,15 @@ class Trainer:
         Trainer module which contains both the full training driver
         which calls the train_batch method
     '''
-    disc_alpha = 1.
-    fc_gamma = 0.75
-    fc_beta = 0.7
+
+    seg_alpha = 200
+    loss_type = 'tversky'
+    tversky_beta = 0.75
+    tversky_gamma = 0.75
 
     neptune_config = None
 
-    def __init__(self, generator, discriminator, savefolder):
+    def __init__(self, generator, discriminator, savefolder, device='cuda'):
         '''
             Store the generator and discriminator info
         '''
@@ -54,6 +36,7 @@ class Trainer:
 
         self.generator = generator
         self.discriminator = discriminator
+        self.device = device
 
         if savefolder[-1] != '/':
             savefolder += '/'
@@ -68,23 +51,36 @@ class Trainer:
         '''
             Train the generator and discriminator on a single batch
         '''
-        torch.autograd.set_detect_anomaly(True)
 
-        # convert the input image and mask to tensors
-        img_tensor = torch.as_tensor(x, dtype=torch.float).to(device)
-        target_tensor = torch.as_tensor(y, dtype=torch.float).to(device)
+        if not isinstance(x, torch.Tensor):
+            input_tensor = torch.as_tensor(x, dtype=torch.float).to(self.device)
+            target_tensor = torch.as_tensor(y, dtype=torch.float).to(self.device)
+        else:
+            input_tensor = x.to(self.device, non_blocking=True)
+            target_tensor = y.to(self.device, non_blocking=True)
 
-        gen_img = self.generator(img_tensor)
+        # train the generator
+        gen_img = self.generator(input_tensor)
 
-        disc_inp_fake = torch.cat((img_tensor, gen_img), 1)
+        disc_inp_fake = torch.cat((input_tensor, gen_img), 1)
         disc_fake = self.discriminator(disc_inp_fake)
 
         labels_real = torch.full(disc_fake.shape, 1, dtype=torch.float, device=device)
         labels_fake = torch.full(disc_fake.shape, 0, dtype=torch.float, device=device)
 
-        gen_loss_tversky = fc_tversky(target_tensor, gen_img, beta=self.fc_beta, gamma=self.fc_gamma)
-        gen_loss_disc = adv_loss(disc_fake, labels_real)
-        gen_loss = gen_loss_tversky + self.disc_alpha * gen_loss_disc
+        if self.loss_type == 'tversky':
+            gen_loss = fc_tversky(target_tensor, gen_img,
+                                  beta=self.tversky_beta,
+                                  gamma=self.tversky_gamma) * self.seg_alpha
+        elif self.loss_type == 'weighted_bce':
+            if gen_img.shape[1] > 1:
+                weight = 1 - torch.sum(target_tensor, dim=(2, 3), keepdim=True) / torch.sum(target_tensor)
+            else:
+                weight = torch.ones_like(target_tensor)
+            gen_loss = binary_cross_entropy(gen_img, target_tensor, weight=weight) * self.seg_alpha
+
+        gen_loss_disc = bce_loss(disc_fake, labels_real)
+        gen_loss = gen_loss + gen_loss_disc
 
         if train:
             self.generator.zero_grad()
@@ -92,33 +88,33 @@ class Trainer:
             self.gen_optimizer.step()
 
         # Train the discriminator
-        # On the real image
         if train:
             self.discriminator.zero_grad()
 
-        disc_inp_real = torch.cat((img_tensor, target_tensor), 1)
+        disc_inp_real = torch.cat((input_tensor, target_tensor), 1)
         disc_real = self.discriminator(disc_inp_real)
-        disc_inp_fake = torch.cat((img_tensor, gen_img.detach()), 1)
+        disc_inp_fake = torch.cat((input_tensor, gen_img.detach()), 1)
         disc_fake = self.discriminator(disc_inp_fake)
 
-        loss_real = adv_loss(disc_real, labels_real.detach())
-        loss_fake = adv_loss(disc_fake, labels_fake)
+        loss_real = bce_loss(disc_real, labels_real.detach())
+        loss_fake = bce_loss(disc_fake, labels_fake)
         disc_loss = (loss_fake + loss_real) / 2.
 
         if train:
             disc_loss.backward()
             self.disc_optimizer.step()
 
-        keys = ['gen', 'tversky', 'gdisc', 'discr', 'discf', 'disc']
-        mean_loss_i = [gen_loss.item(), gen_loss_tversky.item(), gen_loss_disc.item(),
+        keys = ['gen', 'gen_loss', 'gdisc', 'discr', 'discf', 'disc']
+        mean_loss_i = [gen_loss.item(), gen_loss.item(), gen_loss_disc.item(),
                        loss_real.item(), loss_fake.item(), disc_loss.item()]
 
         loss = {key: val for key, val in zip(keys, mean_loss_i)}
 
         return loss
 
-    def train(self, train_data, val_data, epochs, dsc_learning_rate=1.e-4,
-              gen_learning_rate=1.e-3, save_freq=10, lr_decay=None, decay_freq=5, reduce_on_plateau=False):
+    def train(self, train_data, val_data, epochs, dsc_learning_rate=1.e-3,
+              gen_learning_rate=1.e-3, save_freq=10, lr_decay=None, decay_freq=5,
+              reduce_on_plateau=False):
         '''
             Training driver which loads the optimizer and calls the
             `train_batch` method. Also handles checkpoint saving
@@ -126,7 +122,7 @@ class Trainer:
             ------
             train_data : DataLoader object
                 Training data that is mapped using the DataLoader or
-                MmapDataLoader object defined in patchgan/io.py
+                MmapDataLoader object defined in io.py
             val_data : DataLoader object
                 Validation data loaded in using the DataLoader or
                 MmapDataLoader object
@@ -155,10 +151,8 @@ class Trainer:
         '''
 
         if (lr_decay is not None) and not reduce_on_plateau:
-            gen_lr = gen_learning_rate * \
-                (lr_decay)**((self.start - 1) / (decay_freq))
-            dsc_lr = dsc_learning_rate * \
-                (lr_decay)**((self.start - 1) / (decay_freq))
+            gen_lr = gen_learning_rate * (lr_decay)**((self.start - 1) / (decay_freq))
+            dsc_lr = dsc_learning_rate * (lr_decay)**((self.start - 1) / (decay_freq))
         else:
             gen_lr = gen_learning_rate
             dsc_lr = dsc_learning_rate
@@ -168,23 +162,18 @@ class Trainer:
             self.neptune_config['model/parameters/dsc_learning_rate'] = dsc_lr
             self.neptune_config['model/parameters/start'] = self.start
             self.neptune_config['model/parameters/n_epochs'] = epochs
-            self.neptune_config['model/parameters/fc_beta'] = self.fc_beta
-            self.neptune_config['model/parameters/fc_gamma'] = self.fc_gamma
-            self.neptune_config['model/parameters/disc_alpha'] = self.disc_alpha
 
         # create the Adam optimzers
-        self.gen_optimizer = optim.Adam(
-            self.generator.parameters(), lr=gen_lr)
-        self.disc_optimizer = optim.Adam(
-            self.discriminator.parameters(), lr=dsc_lr)
+        self.gen_optimizer = optim.NAdam(
+            self.generator.parameters(), lr=gen_lr, betas=(0.9, 0.999))
+        self.disc_optimizer = optim.NAdam(
+            self.discriminator.parameters(), lr=dsc_lr, betas=(0.9, 0.999))
 
         # set up the learning rate scheduler with exponential lr decay
         if reduce_on_plateau:
             gen_scheduler = ReduceLROnPlateau(self.gen_optimizer, verbose=True)
-            dsc_scheduler = ReduceLROnPlateau(
-                self.disc_optimizer, verbose=True)
-            if self.neptune_config is not None:
-                self.neptune_config['model/parameters/scheduler'] = 'ReduceLROnPlateau'
+            dsc_scheduler = ReduceLROnPlateau(self.disc_optimizer, verbose=True)
+            self.neptune_config['model/parameters/scheduler'] = 'ReduceLROnPlateau'
         elif lr_decay is not None:
             gen_scheduler = ExponentialLR(self.gen_optimizer, gamma=lr_decay)
             dsc_scheduler = ExponentialLR(self.disc_optimizer, gamma=lr_decay)
@@ -210,9 +199,10 @@ class Trainer:
             print("-------------------------------------------------------")
 
             # batch loss data
-            pbar = tqdm.tqdm(train_data, desc='Training: ', dynamic_ncols=True, ascii=True)
+            pbar = tqdm.tqdm(train_data, desc='Training: ', dynamic_ncols=True)
 
-            train_data.shuffle()
+            if hasattr(train_data, 'shuffle'):
+                train_data.shuffle()
 
             # set to training mode
             self.generator.train()
@@ -220,10 +210,10 @@ class Trainer:
 
             losses = defaultdict(list)
             # loop through the training data
-            for i, (input_img, target_img) in enumerate(pbar):
+            for i, (input_img, target_mask) in enumerate(pbar):
 
                 # train on this batch
-                batch_loss = self.batch(input_img, target_img, train=True)
+                batch_loss = self.batch(input_img, target_mask, train=True)
 
                 # append the current batch loss
                 loss_mean = {}
@@ -231,8 +221,7 @@ class Trainer:
                     losses[key].append(value)
                     loss_mean[key] = np.mean(losses[key], axis=0)
 
-                loss_str = " ".join(
-                    [f"{key}: {value:.2e}" for key, value in loss_mean.items()])
+                loss_str = " ".join([f"{key}: {value:.2e}" for key, value in loss_mean.items()])
 
                 pbar.set_postfix_str(loss_str)
 
@@ -242,31 +231,28 @@ class Trainer:
 
             if self.neptune_config is not None:
                 self.neptune_config['train/gen_loss'].append(loss_mean['gen'])
-                self.neptune_config['train/disc_loss'].append(
-                    loss_mean['disc'])
+                self.neptune_config['train/disc_loss'].append(loss_mean['disc'])
 
             # validate every `validation_freq` epochs
             self.discriminator.eval()
             self.generator.eval()
-            pbar = tqdm.tqdm(val_data, desc='Validation: ', ascii=True, dynamic_ncols=True)
+            pbar = tqdm.tqdm(val_data, desc='Validation: ')
 
-            val_data.shuffle()
+            if hasattr(val_data, 'shuffle'):
+                val_data.shuffle()
 
             losses = defaultdict(list)
             # loop through the training data
-            for i, (input_img, target_img) in enumerate(pbar):
-
-                # train on this batch
-                with torch.no_grad():
-                    batch_loss = self.batch(input_img, target_img, train=False)
+            for i, (input_img, target_mask) in enumerate(pbar):
+                # validate on this batch
+                batch_loss = self.batch(input_img, target_mask, train=False)
 
                 loss_mean = {}
                 for key, value in batch_loss.items():
                     losses[key].append(value)
                     loss_mean[key] = np.mean(losses[key], axis=0)
 
-                loss_str = " ".join(
-                    [f"{key}: {value:.2e}" for key, value in loss_mean.items()])
+                loss_str = " ".join([f"{key}: {value:.2e}" for key, value in loss_mean.items()])
 
                 pbar.set_postfix_str(loss_str)
 
@@ -331,3 +317,25 @@ class Trainer:
         dfname = discriminator_save.split('/')[-1]
         print(
             f"Loaded checkpoints from {gfname} and {dfname}")
+
+# custom weights initialization called on generator and discriminator
+# scaling here means std
+
+
+def weights_init(net, init_type='normal', scaling=0.02):
+    """Initialize network weights.
+    Parameters:
+        net (network)   -- network to be initialized
+        init_type (str) -- the name of an initialization method: normal | xavier | kaiming | orthogonal
+        init_gain (float)    -- scaling factor for normal, xavier and orthogonal.
+    We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
+    work better for some applications. Feel free to try yourself.
+    """
+    def init_func(m):  # define the initialization function
+        classname = m.__class__.__name__
+        if hasattr(m, 'weight') and (classname.find('Conv')) != -1:
+            torch.nn.init.xavier_uniform_(m.weight.data)
+        # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
+        elif classname.find('BatchNorm') != -1:
+            torch.nn.init.xavier_uniform_(m.weight.data, 1.0)
+            torch.nn.init.constant_(m.bias.data, 0.0)
