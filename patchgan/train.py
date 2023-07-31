@@ -47,8 +47,15 @@ def patchgan_train():
         out_channels = len(labels)
         dataset_kwargs['labels'] = labels
     else:
-        spec = importlib.machinery.SourceFileLoader('', 'io.py')
-        Dataset = spec.load_module().__getattribute__(config['dataset']['type'])
+        try:
+            spec = importlib.machinery.SourceFileLoader('io', 'io.py')
+            Dataset = spec.load_module().__getattribute__(config['dataset']['type'])
+        except FileNotFoundError:
+            print("Make sure io.py is in the working directory!")
+            raise
+        except (ImportError, ModuleNotFoundError):
+            print(f"io.py does not contain {config['dataset']['type']}")
+            raise
         in_channels = 4
         out_channels = 1
 
