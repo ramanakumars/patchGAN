@@ -24,6 +24,11 @@ setup(
     author='Kameswara Mantha, Ramanakumar Sankar, Lucy Fortson',
     author_email='manth145@umn.edu, rsankar@umn.edu, lfortson@umn.edu',
     packages=find_packages(),
+    entry_points={
+        'console_scripts': [
+            'patchgan_train = patchgan.train:patchgan_train'
+        ]
+    },
     install_requires=[
         'numpy>=1.21.0,<1.25.2',
         'torch>=1.13.0',
