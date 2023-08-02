@@ -88,6 +88,11 @@ def patchgan_train():
 
     if config.get('load_last_checkpoint', False):
         trainer.load_last_checkpoint()
+    elif config.get('transfer_learn', {}).get('generator_checkpoint', None) is not None:
+        gen_checkpoint = config['transfer_learn']['generator_checkpoint']
+        dsc_checkpoint = config['transfer_learn']['discriminator_checkpoint']
+        generator.load_transfer_data(torch.load(gen_checkpoint, map_location=args.device))
+        discriminator.load_transfer_data(torch.load(dsc_checkpoint, map_location=args.device))
 
     train_params = config['train_params']
 
