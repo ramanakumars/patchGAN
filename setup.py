@@ -32,8 +32,8 @@ setup(
     install_requires=[
         'numpy>=1.21.0,<1.25.2',
         'torch>=1.13.0',
-        'torchvision>=0.14.0,<=0.15.0',
-        'tqdm>=4.62.3,<=4.65.0',
+        'torchvision>=0.14.0',
+        'tqdm>=4.62.3',
         'torchinfo>=1.5.0,',
         'pyyaml',
     ]
