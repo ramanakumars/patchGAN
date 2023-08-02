@@ -34,5 +34,7 @@ setup(
         'torch>=1.13.0',
         'torchvision>=0.14.0,<=0.15.0',
         'tqdm>=4.62.3,<=4.65.0',
+        'torchinfo>=1.5.0,',
+        'pyyaml',
     ]
 )
