@@ -4,7 +4,7 @@ from patchgan.unet import UNet
 from patchgan.disc import Discriminator
 from patchgan.io import COCOStuffDataset
 from patchgan.trainer import Trainer
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import yaml
 import importlib.machinery
 import argparse
@@ -34,8 +34,15 @@ def patchgan_train():
         config = yaml.safe_load(infile)
 
     dataset_params = config['dataset']
-    train_data_paths = dataset_params['train_data']
-    val_data_paths = dataset_params['validation_data']
+    if ('train_data' in dataset_params) and ('validation_data' in dataset_params):
+        train_data_paths = dataset_params['train_data']
+        val_data_paths = dataset_params['validation_data']
+        train_val_split = None
+    elif ('data' in dataset_params) and ('train_val_split' in dataset_params):
+        data_paths = dataset_params['data']
+        train_val_split = dataset_params['train_val_split']
+    else:
+        raise AttributeError("Please provide either the training and validation data paths or a train/val split!")
 
     size = dataset_params.get('size', 256)
     augmentation = dataset_params.get('augmentation', 'randomcrop')
@@ -57,11 +64,15 @@ def patchgan_train():
         except (ImportError, ModuleNotFoundError):
             print(f"io.py does not contain {dataset_params['type']}")
             raise
-        in_channels = 4
-        out_channels = 1
+        in_channels = dataset_params.get('in_channels', 3)
+        out_channels = dataset_params.get('out_channels', 1)
 
-    train_datagen = Dataset(train_data_paths['images'], train_data_paths['masks'], size=size, augmentation=augmentation, **dataset_kwargs)
-    val_datagen = Dataset(val_data_paths['images'], val_data_paths['masks'], size=size, augmentation=augmentation, **dataset_kwargs)
+    if train_val_split is None:
+        train_datagen = Dataset(train_data_paths['images'], train_data_paths['masks'], size=size, augmentation=augmentation, **dataset_kwargs)
+        val_datagen = Dataset(val_data_paths['images'], val_data_paths['masks'], size=size, augmentation=augmentation, **dataset_kwargs)
+    else:
+        datagen = Dataset(data_paths['images'], data_paths['masks'], size=size, augmentation=augmentation, **dataset_kwargs)
+        train_datagen, val_datagen = random_split(datagen, train_val_split)
 
     model_params = config['model_params']
     gen_filts = model_params['gen_filts']
@@ -71,8 +82,13 @@ def patchgan_train():
     use_dropout = model_params.get('use_dropout', True)
     final_activation = model_params.get('final_activation', 'sigmoid')
 
-    train_data = DataLoader(train_datagen, num_workers=args.dataloader_workers, batch_size=args.batch_size, shuffle=True, pin_memory=True)
-    val_data = DataLoader(val_datagen, num_workers=args.dataloader_workers, batch_size=args.batch_size, shuffle=True, pin_memory=True)
+    dloader_kwargs = {}
+    if args.dataloader_workers > 0:
+        dloader_kwargs['num_workers'] = args.dataloader_workers
+        dloader_kwargs['persistent_workers'] = True
+
+    train_data = DataLoader(train_datagen, batch_size=args.batch_size, shuffle=True, pin_memory=True, **dloader_kwargs)
+    val_data = DataLoader(val_datagen, batch_size=args.batch_size, shuffle=True, pin_memory=True, **dloader_kwargs)
 
     # create the generator
     generator = UNet(in_channels, out_channels, gen_filts, use_dropout=use_dropout, activation=activation, final_act=final_activation).to(device)
