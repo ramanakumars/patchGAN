@@ -26,7 +26,7 @@ class Discriminator(nn.Module, Transferable):
             sequence += [
                 nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
                           kernel_size=kw, stride=2, padding=padw, bias=False),
-                nn.LeakyReLU(0.2, True),
+                nn.Tanh(),
                 norm_layer(ndf * nf_mult)
             ]
 
@@ -35,7 +35,7 @@ class Discriminator(nn.Module, Transferable):
         sequence += [
             nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
                       kernel_size=kw, stride=1, padding=padw, bias=False),
-            nn.LeakyReLU(0.2, True),
+            nn.Tanh(),
             norm_layer(ndf * nf_mult)
         ]
 
