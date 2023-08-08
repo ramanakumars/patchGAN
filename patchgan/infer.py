@@ -115,7 +115,7 @@ def patchgan_infer():
         in_channels = dataset_params.get('in_channels', 3)
         out_channels = dataset_params.get('out_channels', 1)
 
-    assert hasattr(Dataset, 'get_filename') and callable(Dataset.get_filename),\
+    assert hasattr(Dataset, 'get_filename') and callable(Dataset.get_filename), \
         f"Dataset class {Dataset.__name__} must have the get_filename method which returns the image filename for a given index"
 
     datagen = Dataset(dataset_path, size=size, **dataset_kwargs)
