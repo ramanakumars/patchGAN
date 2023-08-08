@@ -138,7 +138,7 @@ def patchgan_infer():
         summary(generator, [1, in_channels, size, size])
         summary(discriminator, [1, in_channels + out_channels, size, size])
 
-    checkpoint_paths = config.get('checkpoint_paths')
+    checkpoint_paths = config['checkpoint_paths']
     gen_checkpoint = checkpoint_paths['generator']
     dsc_checkpoint = checkpoint_paths['discriminator']
 
