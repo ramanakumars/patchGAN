@@ -336,6 +336,6 @@ def weights_init(net, init_type='normal', scaling=0.02):
         if hasattr(m, 'weight') and (classname.find('Conv')) != -1:
             torch.nn.init.xavier_uniform_(m.weight.data)
         # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
-        elif classname.find('BatchNorm') != -1:
+        elif classname.find('InstanceNorm') != -1:
             torch.nn.init.xavier_uniform_(m.weight.data, 1.0)
             torch.nn.init.constant_(m.bias.data, 0.0)
