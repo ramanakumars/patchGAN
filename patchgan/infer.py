@@ -118,7 +118,7 @@ def patchgan_infer():
     assert hasattr(Dataset, 'get_filename') and callable(Dataset.get_filename), \
         f"Dataset class {Dataset.__name__} must have the get_filename method which returns the image filename for a given index"
 
-    datagen = Dataset(dataset_path, size=size, **dataset_kwargs)
+    datagen = Dataset(dataset_path, **dataset_kwargs)
 
     model_params = config['model_params']
     gen_filts = model_params['gen_filts']
@@ -166,6 +166,6 @@ def patchgan_infer():
             img_tensor = torch.Tensor(imgs).to(device)
             masks = generator(img_tensor).cpu().numpy()
 
-        mask = build_mask(masks, datagen.size, data.shape[1:], threshold, overlap)
+        mask = build_mask(masks, size, data.shape[1:], threshold, overlap)
 
         plt.imsave(os.path.join(output_path, out_fname + ".png"), mask, cmap='gray')
