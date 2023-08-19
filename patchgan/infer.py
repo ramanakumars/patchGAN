@@ -125,11 +125,10 @@ def patchgan_infer():
     disc_filts = model_params['disc_filts']
     n_disc_layers = model_params['n_disc_layers']
     activation = model_params['activation']
-    use_dropout = model_params.get('use_dropout', True)
     final_activation = model_params.get('final_activation', 'sigmoid')
 
     # create the generator
-    generator = UNet(in_channels, out_channels, gen_filts, use_dropout=use_dropout, activation=activation, final_act=final_activation).to(device)
+    generator = UNet(in_channels, out_channels, gen_filts, activation=activation, final_act=final_activation).to(device)
 
     # create the discriminator
     discriminator = Discriminator(in_channels + out_channels, disc_filts, n_layers=n_disc_layers).to(device)
