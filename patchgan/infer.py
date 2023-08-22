@@ -9,7 +9,6 @@ import os
 import numpy as np
 import importlib.machinery
 import argparse
-import matplotlib.pyplot as plt
 
 
 def n_crop(image, size, overlap):
@@ -87,6 +86,8 @@ def patchgan_infer():
     elif args.device in ['cuda', 'cpu']:
         device = args.device
 
+    print(f"Running with {device}")
+
     with open(args.config_file, 'r') as infile:
         config = yaml.safe_load(infile)
 
@@ -134,8 +135,8 @@ def patchgan_infer():
     discriminator = Discriminator(in_channels + out_channels, disc_filts, n_layers=n_disc_layers).to(device)
 
     if args.summary:
-        summary(generator, [1, in_channels, size, size])
-        summary(discriminator, [1, in_channels + out_channels, size, size])
+        summary(generator, [1, in_channels, size, size], device=device)
+        summary(discriminator, [1, in_channels + out_channels, size, size], device=device)
 
     checkpoint_paths = config['checkpoint_paths']
     gen_checkpoint = checkpoint_paths['generator']
@@ -167,4 +168,4 @@ def patchgan_infer():
 
         mask = build_mask(masks, size, data.shape[1:], threshold, overlap)
 
-        plt.imsave(os.path.join(output_path, out_fname + ".png"), mask, cmap='gray')
+        Dataset.save_mask(mask, output_path, out_fname)
