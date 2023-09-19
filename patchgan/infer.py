@@ -119,6 +119,9 @@ def patchgan_infer():
     assert hasattr(Dataset, 'get_filename') and callable(Dataset.get_filename), \
         f"Dataset class {Dataset.__name__} must have the get_filename method which returns the image filename for a given index"
 
+    assert hasattr(Dataset, 'save_mask') and callable(Dataset.save_mask), \
+        f"Dataset class {Dataset.__name__} must have the save_mask method to save a mask cube for a given filename"
+
     datagen = Dataset(dataset_path, **dataset_kwargs)
 
     model_params = config['model_params']
