@@ -31,5 +31,9 @@ def fc_tversky(y_true, y_pred, beta, gamma=0.75, batch_mean=True):
         return torch.pow(focal_tversky_loss, gamma)
 
 
+def MAE_loss(y_true, y_pred):
+    return torch.mean(torch.abs(y_true - y_pred))
+
+
 # alias
 bce_loss = nn.BCELoss()

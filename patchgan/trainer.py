@@ -5,7 +5,7 @@ import glob
 import numpy as np
 from torch import optim
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
-from .losses import fc_tversky, bce_loss
+from .losses import fc_tversky, bce_loss, MAE_loss
 from torch.nn.functional import binary_cross_entropy
 from collections import defaultdict
 
@@ -78,6 +78,8 @@ class Trainer:
             else:
                 weight = torch.ones_like(target_tensor)
             gen_loss = binary_cross_entropy(gen_img, target_tensor, weight=weight) * self.seg_alpha
+        elif self.loss_type == 'MAE':
+            gen_loss = MAE_loss(gen_img, target_tensor) * self.seg_alpha
 
         gen_loss_disc = bce_loss(disc_fake, labels_real)
         gen_loss = gen_loss + gen_loss_disc
@@ -164,9 +166,9 @@ class Trainer:
             self.neptune_config['model/parameters/n_epochs'] = epochs
 
         # create the Adam optimzers
-        self.gen_optimizer = optim.NAdam(
+        self.gen_optimizer = optim.Adam(
             self.generator.parameters(), lr=gen_lr, betas=(0.9, 0.999))
-        self.disc_optimizer = optim.NAdam(
+        self.disc_optimizer = optim.Adam(
             self.discriminator.parameters(), lr=dsc_lr, betas=(0.9, 0.999))
 
         # set up the learning rate scheduler with exponential lr decay
