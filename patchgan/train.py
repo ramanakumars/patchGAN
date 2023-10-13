@@ -74,14 +74,6 @@ def patchgan_train():
         datagen = Dataset(data_paths['images'], data_paths['masks'], size=size, augmentation=augmentation, **dataset_kwargs)
         train_datagen, val_datagen = random_split(datagen, train_val_split)
 
-    model_params = config['model_params']
-    gen_filts = model_params['gen_filts']
-    disc_filts = model_params['disc_filts']
-    n_disc_layers = model_params['n_disc_layers']
-    activation = model_params['activation']
-    use_dropout = model_params.get('use_dropout', True)
-    final_activation = model_params.get('final_activation', 'sigmoid')
-
     dloader_kwargs = {}
     if args.dataloader_workers > 0:
         dloader_kwargs['num_workers'] = args.dataloader_workers
@@ -90,14 +82,25 @@ def patchgan_train():
     train_data = DataLoader(train_datagen, batch_size=args.batch_size, shuffle=True, pin_memory=True, **dloader_kwargs)
     val_data = DataLoader(val_datagen, batch_size=args.batch_size, shuffle=True, pin_memory=True, **dloader_kwargs)
 
+    model_params = config['model_params']
+    generator_config = model_params['generator']
+    discriminator_config = model_params['discriminator']
+
     # create the generator
+    gen_filts = generator_config['filters']
+    activation = generator_config['activation']
+    use_dropout = generator_config.get('use_dropout', True)
+    final_activation = generator_config.get('final_activation', 'sigmoid')
     generator = UNet(in_channels, out_channels, gen_filts, use_dropout=use_dropout, activation=activation, final_act=final_activation).to(device)
 
     # create the discriminator
-    discriminator = Discriminator(in_channels + out_channels, disc_filts, n_layers=n_disc_layers).to(device)
+    disc_filts = discriminator_config['filters']
+    disc_norm = discriminator_config.get('norm', False)
+    n_disc_layers = discriminator_config['n_layers']
+    discriminator = Discriminator(in_channels + out_channels, disc_filts, norm=disc_norm, n_layers=n_disc_layers).to(device)
 
     if args.summary:
-        summary(generator, [1, in_channels, size, size])
+        summary(generator, [1, in_channels, size, size], depth=4)
         summary(discriminator, [1, in_channels + out_channels, size, size])
 
     checkpoint_path = config.get('checkpoint_path', './checkpoints/')

@@ -20,8 +20,8 @@ class DownSampleBlock(nn.Module):
         downnorm = norm_layer(output_filt)
 
         enc_sub = OrderedDict([(f'DownConv{layer}', downconv),
-                               (f'DownAct{layer}', activation),
                                (f'DownNorm{layer}', downnorm),
+                               (f'DownAct{layer}', activation),
                                ])
         if use_dropout:
             enc_sub = OrderedDict(chain(enc_sub.items(),
@@ -54,8 +54,9 @@ class UpSampleBlock(nn.Module):
         if batch_norm:
             upnorm = norm_layer(output_filt)
             dec_sub = OrderedDict([(f'UpConv{layer}', upconv),
+                                   (f'UpNorm{layer}', upnorm),
                                    (f'UpAct{layer}', activation),
-                                   (f'UpNorm{layer}', upnorm)])
+                                   ])
         else:
             dec_sub = OrderedDict([(f'UpConv{layer}', upconv),
                                    (f'UpAct{layer}', activation)])
