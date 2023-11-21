@@ -1,7 +1,5 @@
 import torch
 from torchinfo import summary
-from patchgan.unet import UNet
-from patchgan.disc import Discriminator
 from patchgan.io import COCOStuffDataset
 from patchgan.trainer import PatchGAN
 from torch.utils.data import DataLoader, random_split

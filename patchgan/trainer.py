@@ -1,13 +1,9 @@
 import torch
 import os
-import tqdm
 import glob
-import numpy as np
-from torch import optim
-from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import ExponentialLR
 from .losses import fc_tversky, bce_loss, MAE_loss
 from torch.nn.functional import binary_cross_entropy
-from collections import defaultdict
 from .unet import UNet
 from .disc import Discriminator
 import lightning as L
