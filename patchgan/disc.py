@@ -1,5 +1,6 @@
 from torch import nn
 from .transfer import Transferable
+from .unet import weights_init
 
 
 class Discriminator(nn.Module, Transferable):
@@ -45,6 +46,8 @@ class Discriminator(nn.Module, Transferable):
         sequence += [nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw,
                                stride=1, padding=padw), nn.Sigmoid()]
         self.model = nn.Sequential(*sequence)
+
+        self.apply(weights_init)
 
     def forward(self, input):
         """Standard forward."""
