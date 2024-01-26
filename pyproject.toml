@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools >= 61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patchgan"
+dynamic = ["version"]
+license = { file = 'LICENSE' }
+description = 'patchGAN image segmentation model in PyTorch'
+requires-python = ">=3.8"
+dependencies = [
+    'numpy>=1.21.0,<1.25.2',
+    'torch>=2.1',
+    'matplotlib>3.5.0',
+    'torchvision>=0.14.0',
+    'tqdm>=4.62.3',
+    'torchinfo>=1.5.0,',
+    'pyyaml',
+    'patchify',
+    'einops',
+]
+keywords = ["generative model", "deep learning", "U-Net", "image segmentation"]
+authors = [
+    { name = 'Ramanakumar Sankar', email = 'ramanakumar.sankar@berkeley.edu' },
+    { name = 'Kameswara Mantha', email = 'manth145@umn.edu' },
+    { name = 'Lucy Fortson', email = 'lfortson@umn.edu' },
+]
+readme = "README.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "patchgan.version.__version__" }
+
+[project.scripts]
+patchgan_train = 'patchgan.train:patchgan_train'
+patchgan_infer = 'patchgan.infer:patchgan_infer'
+
+[project.urls]
+repository = "https://www.github.com/ramanakumars/patchGAN"
