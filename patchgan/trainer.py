@@ -6,6 +6,7 @@ from .losses import fc_tversky, bce_loss, MAE_loss
 from torch.nn.functional import binary_cross_entropy
 from .unet import UNet
 from .disc import Discriminator
+from typing import Union, Optional
 import lightning as L
 
 
@@ -52,9 +53,9 @@ class PatchGAN(L.LightningModule):
         for key, val in mean_loss.items():
             self.log(key, val, prog_bar=True, on_epoch=True, reduce_fx=torch.mean)
 
-    def batch_step(self, batch: torch.Tensor | tuple[torch.Tensor], train: bool,
-                   optimizer_g: torch.optim.Optimizer | None = None,
-                   optimizer_d: torch.optim.Optimizer | None = None):
+    def batch_step(self, batch: Union[torch.Tensor, tuple[torch.Tensor]], train: bool,
+                   optimizer_g: Optional[torch.optim.Optimizer] = None,
+                   optimizer_d: Optional[torch.optim.Optimizer] = None):
         input_tensor, target_tensor = batch
 
         # train the generator
