@@ -1,7 +1,8 @@
 import torch
 from torchinfo import summary
-from patchgan.io import COCOStuffDataset
-from patchgan.trainer import PatchGAN
+from .io import COCOStuffDataset
+from .patchgan import PatchGAN
+import os
 from torch.utils.data import DataLoader, random_split
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
@@ -84,8 +85,9 @@ def patchgan_train():
 
     checkpoint_path = config.get('checkpoint_path', './checkpoints/')
     model = None
-    if config.get('load_last_checkpoint', False):
-        model = PatchGAN.load_last_checkpoint(checkpoint_path)
+    checkpoint_file = config.get('load_from_checkpoint', '')
+    if os.path.isfile(checkpoint_file):
+        model = PatchGAN.load_from_checkpoint(checkpoint_file)
 
     if model is None:
         model_params = config['model_params']
@@ -116,8 +118,8 @@ def patchgan_train():
 
     if config.get('transfer_learn', {}).get('checkpoint', None) is not None:
         checkpoint = torch.load(config['transfer_learn']['checkpoint'], map_location=device)
-        model.generator.load_transfer_data({key: value for key, value in checkpoint['state_dict'].items() if 'generator' in key})
-        model.discriminator.load_transfer_data({key: value for key, value in checkpoint['state_dict'].items() if 'discriminator' in key})
+        model.generator.load_transfer_data({key.replace('PatchGAN.', ''): value for key, value in checkpoint['state_dict'].items() if 'generator' in key})
+        model.discriminator.load_transfer_data({key.replace('PatchGAN.', ''): value for key, value in checkpoint['state_dict'].items() if 'discriminator' in key})
 
     if args.summary:
         summary(model.generator, [1, in_channels, size, size], depth=4)
@@ -131,4 +133,7 @@ def patchgan_train():
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     trainer = Trainer(accelerator=device, max_epochs=args.n_epochs, callbacks=[checkpoint_callback, lr_monitor])
 
-    trainer.fit(model, train_data, val_data)
+    if os.path.isfile(checkpoint_file):
+        trainer.fit(model, train_data, val_data, ckpt_path=checkpoint_file)
+    else:
+        trainer.fit(model, train_data, val_data)
