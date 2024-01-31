@@ -1,6 +1,6 @@
 from .unet import UNet
 from .disc import Discriminator
-from .trainer import PatchGAN
+from .patchgan import PatchGAN
 from .version import __version__
 
 __all__ = [
