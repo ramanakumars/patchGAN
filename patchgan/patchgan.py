@@ -3,10 +3,10 @@ from typing import Iterable
 from torch import nn
 from torch.optim.lr_scheduler import ExponentialLR
 from .losses import fc_tversky, bce_loss, MAE_loss
-from torch.nn.functional import binary_cross_entropy
+from torch.nn.functional import binary_cross_entropy, one_hot
 from .disc import Discriminator
-from .conv_layers import Encoder, Decoder
 from .point_encoder import PointEncoder
+from .conv_layers import Encoder, Decoder
 from typing import Union, Optional
 import lightning as L
 
@@ -18,7 +18,7 @@ class PatchGAN(L.LightningModule):
     def __init__(self, input_channels: int, output_channels: int, gen_filts: int, disc_filts: int, final_activation: str,
                  n_disc_layers: int = 5, use_gen_dropout: bool = True, gen_activation: str = 'leakyrelu',
                  disc_norm: bool = False, gen_lr: float = 1.e-3, dsc_lr: float = 1.e-3, lr_decay: float = 0.98,
-                 decay_freq: int = 5, adam_b1: float = 0.5, adam_b2: float = 0.999, seg_alpha: float = 200,
+                 decay_freq: int = 5, adam_b1: float = 0.9, adam_b2: float = 0.999, seg_alpha: float = 200,
                  loss_type: str = 'tversky', tversky_beta: float = 0.75, tversky_gamma: float = 0.75):
         super().__init__()
         self.save_hyperparameters()
@@ -101,18 +101,20 @@ class PatchGAN(L.LightningModule):
         labels_real = torch.full(disc_fake.shape, 1, dtype=torch.float, device=device)
         labels_fake = torch.full(disc_fake.shape, 0, dtype=torch.float, device=device)
 
+        target_tensor_full = one_hot(target_tensor, self.hparams.output_channels).permute(0, 3, 1, 2).to(torch.float)
+
         if self.hparams.loss_type == 'tversky':
-            gen_loss = fc_tversky(target_tensor, gen_img,
+            gen_loss = fc_tversky(target_tensor_full, gen_img,
                                   beta=self.hparams.tversky_beta,
                                   gamma=self.hparams.tversky_gamma) * self.hparams.seg_alpha
         elif self.hparams.loss_type == 'weighted_bce':
             if gen_img.shape[1] > 1:
-                weight = 1 - torch.sum(target_tensor, dim=(2, 3), keepdim=True) / torch.sum(target_tensor)
+                weight = 1 - torch.sum(target_tensor_full, dim=(2, 3), keepdim=True) / (torch.sum(target_tensor_full) + 1.e-6)
             else:
-                weight = torch.ones_like(target_tensor)
-            gen_loss = binary_cross_entropy(gen_img, target_tensor, weight=weight) * self.hparams.seg_alpha
+                weight = torch.ones_like(target_tensor_full)
+            gen_loss = binary_cross_entropy(gen_img, target_tensor_full, weight=weight) * self.hparams.seg_alpha
         elif self.hparams.loss_type == 'MAE':
-            gen_loss = MAE_loss(gen_img, target_tensor) * self.hparams.seg_alpha
+            gen_loss = MAE_loss(gen_img, target_tensor_full) * self.hparams.seg_alpha
 
         gen_loss_disc = bce_loss(disc_fake, labels_real)
         gen_loss = gen_loss + gen_loss_disc
@@ -128,7 +130,7 @@ class PatchGAN(L.LightningModule):
         if train:
             self.toggle_optimizer(optimizer_d)
 
-        disc_inp_real = torch.cat((input_tensor, target_tensor), 1)
+        disc_inp_real = torch.cat((input_tensor, target_tensor_full), 1)
         disc_real = self.discriminator(disc_inp_real)
         disc_inp_fake = torch.cat((input_tensor, gen_img.detach()), 1)
         disc_fake = self.discriminator(disc_inp_fake)
@@ -186,6 +188,9 @@ class PatchGANPoint(PatchGAN):
         # by default use the final number of filters in the UNet (hard-coded to gen_filts * 8)
         self.point_encoder = PointEncoder(self.hparams.gen_filts * 8)
 
+    def get_parameters(self):
+        return list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.point_encoder.parameters()), self.discriminator.parameters()
+
     def forward(self, x, point):
         xencs = []
 
@@ -195,11 +200,10 @@ class PatchGANPoint(PatchGAN):
 
         hidden = xencs[-1]
 
-        _, c, h, w = hidden.shape
+        _, _, h, w = hidden.shape
+        point_mask = self.point_encoder(point).unsqueeze(2).unsqueeze(3).repeat(1, 1, h, w)
 
-        z_point = self.point_encoder(point).unsqueeze(2).unsqueeze(3).repeat(1, 1, h, w)
-
-        hidden = hidden + z_point
+        hidden = hidden * point_mask
 
         xencs = xencs[::-1]
 
