@@ -1,9 +1,12 @@
 import torch
+from typing import Iterable
+from torch import nn
 from torch.optim.lr_scheduler import ExponentialLR
 from .losses import fc_tversky, bce_loss, MAE_loss
 from torch.nn.functional import binary_cross_entropy
-from .unet import UNet
 from .disc import Discriminator
+from .conv_layers import Encoder, Decoder
+from .point_encoder import PointEncoder
 from typing import Union, Optional
 import lightning as L
 
@@ -21,13 +24,44 @@ class PatchGAN(L.LightningModule):
         self.save_hyperparameters()
         self.automatic_optimization = False
 
-        self.generator = UNet(input_channels, output_channels, gen_filts, use_dropout=use_gen_dropout,
-                              activation=gen_activation, final_act=final_activation)
+        self.encoder = Encoder(input_channels, gen_filts, gen_activation, use_gen_dropout)
+        self.decoder = Decoder(output_channels, gen_filts, gen_activation, final_activation, use_gen_dropout)
+
         self.discriminator = Discriminator(input_channels + output_channels, disc_filts,
                                            norm=disc_norm, n_layers=n_disc_layers)
 
-    def forward(self, img, return_hidden=False):
-        return self.generator(img, return_hidden)
+    @classmethod
+    def load_transfer_data(cls, checkpoint_path: str, input_channels: int, output_channels: int):
+        checkpoint = torch.load(checkpoint_path)
+        model_kwargs = checkpoint['hyperparameters']
+        model_kwargs['input_channels'] = input_channels
+        model_kwargs['output_channels'] = output_channels
+        obj = cls(**model_kwargs)
+
+        raise ValueError("weights loading not implemented!")
+
+        return obj
+
+    def forward(self, x):
+        xencs = []
+
+        for i, layer in enumerate(self.encoder):
+            x = layer(x)
+            xencs.append(x)
+
+        hidden = xencs[-1]
+
+        xencs = xencs[::-1]
+
+        for i, layer in enumerate(self.decoder):
+            if i == 0:
+                xinp = hidden
+            else:
+                xinp = torch.cat([x, xencs[i]], dim=1)
+
+            x = layer(xinp)
+
+        return x
 
     def training_step(self, batch):
         '''
@@ -51,13 +85,15 @@ class PatchGAN(L.LightningModule):
         for key, val in mean_loss.items():
             self.log(key, val, prog_bar=True, on_epoch=True, reduce_fx=torch.mean)
 
+    def forward_batch(self, batch):
+        input_tensor, target_tensor = batch
+        return self(input_tensor), input_tensor, target_tensor
+
     def batch_step(self, batch: Union[torch.Tensor, tuple[torch.Tensor]], train: bool,
                    optimizer_g: Optional[torch.optim.Optimizer] = None,
                    optimizer_d: Optional[torch.optim.Optimizer] = None):
-        input_tensor, target_tensor = batch
-
         # train the generator
-        gen_img = self.generator(input_tensor)
+        gen_img, input_tensor, target_tensor = self.forward_batch(batch)
 
         disc_inp_fake = torch.cat((input_tensor, gen_img), 1)
         disc_fake = self.discriminator(disc_inp_fake)
@@ -115,12 +151,17 @@ class PatchGAN(L.LightningModule):
 
         return loss
 
+    def get_parameters(self) -> tuple[Iterable[nn.Parameter]]:
+        return list(self.encoder.parameters()) + list(self.decoder.parameters()), self.discriminator.parameters()
+
     def configure_optimizers(self):
         gen_lr = self.hparams.gen_lr
         dsc_lr = self.hparams.dsc_lr
 
-        opt_g = torch.optim.Adam(self.generator.parameters(), lr=gen_lr, betas=(self.hparams.adam_b1, self.hparams.adam_b2))
-        opt_d = torch.optim.Adam(self.discriminator.parameters(), lr=dsc_lr, betas=(self.hparams.adam_b1, self.hparams.adam_b2))
+        generator_params, discriminator_params = self.get_parameters()
+
+        opt_g = torch.optim.Adam(generator_params, lr=gen_lr, betas=(self.hparams.adam_b1, self.hparams.adam_b2))
+        opt_d = torch.optim.Adam(discriminator_params, lr=dsc_lr, betas=(self.hparams.adam_b1, self.hparams.adam_b2))
 
         gen_lr_scheduler = ExponentialLR(opt_g, gamma=self.hparams.lr_decay)
         dsc_lr_scheduler = ExponentialLR(opt_d, gamma=self.hparams.lr_decay)
@@ -135,3 +176,43 @@ class PatchGAN(L.LightningModule):
 
         return [{"optimizer": opt_g, "lr_scheduler": gen_lr_scheduler_config},
                 {"optimizer": opt_d, "lr_scheduler": dsc_lr_scheduler_config}]
+
+
+class PatchGANPoint(PatchGAN):
+    def __init__(self, *patchgan_args, **patchgan_kwargs):
+        super().__init__(*patchgan_args, **patchgan_kwargs)
+
+        # create the point encoder to attach to the latent block
+        # by default use the final number of filters in the UNet (hard-coded to gen_filts * 8)
+        self.point_encoder = PointEncoder(self.hparams.gen_filts * 8)
+
+    def forward(self, x, point):
+        xencs = []
+
+        for i, layer in enumerate(self.encoder):
+            x = layer(x)
+            xencs.append(x)
+
+        hidden = xencs[-1]
+
+        _, c, h, w = hidden.shape
+
+        z_point = self.point_encoder(point).unsqueeze(2).unsqueeze(3).repeat(1, 1, h, w)
+
+        hidden = hidden + z_point
+
+        xencs = xencs[::-1]
+
+        for i, layer in enumerate(self.decoder):
+            if i == 0:
+                xinp = hidden
+            else:
+                xinp = torch.cat([x, xencs[i]], dim=1)
+
+            x = layer(xinp)
+
+        return x
+
+    def forward_batch(self, batch):
+        input_tensor, point, target_tensor = batch
+        return self(input_tensor, point), input_tensor, target_tensor

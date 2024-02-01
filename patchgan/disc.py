@@ -1,6 +1,6 @@
 from torch import nn
 from .transfer import Transferable
-from .unet import weights_init
+from .conv_layers import weights_init
 
 
 class Discriminator(nn.Module, Transferable):
