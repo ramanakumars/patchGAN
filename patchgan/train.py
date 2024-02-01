@@ -1,7 +1,7 @@
 import torch
 from torchinfo import summary
-from .io import COCOStuffDataset
-from .patchgan import PatchGAN
+from .io import COCOStuffDataset, COCOStuffPointDataset
+from .patchgan import PatchGAN, PatchGANPoint
 import os
 from torch.utils.data import DataLoader, random_split
 from lightning.pytorch import Trainer
@@ -22,7 +22,7 @@ def patchgan_train():
     parser.add_argument('--dataloader_workers', default=4, type=int, help='Number of workers to use with dataloader (set to 0 to disable multithreading)')
     parser.add_argument('-n', '--n_epochs', required=True, type=int, help='Number of epochs to train the model')
     parser.add_argument('-d', '--device', default='auto', help='Device to use to train the model (CUDA=GPU)')
-    parser.add_argument('--summary', default=True, action='store_true', help="Print summary of the models")
+    parser.add_argument('--summary', action='store_true', help="Print summary of the models")
 
     args = parser.parse_args()
 
@@ -45,15 +45,32 @@ def patchgan_train():
     else:
         raise AttributeError("Please provide either the training and validation data paths or a train/val split!")
 
+    model_type = config.get('model_type', 'patchgan')
+
+    if model_type == 'patchgan':
+        patchgan_model = PatchGAN
+    elif model_type == 'patchgan_point':
+        patchgan_model = PatchGANPoint
+    else:
+        raise ValueError(f"{model_type} not supported!")
+
     size = dataset_params.get('size', 256)
     augmentation = dataset_params.get('augmentation', 'randomcrop')
 
     dataset_kwargs = {}
     if dataset_params['type'] == 'COCOStuff':
+        assert model_type == 'patchgan', "model_type should be set to 'patchgan' to use the COCOStuff dataset. Did you mean COCOStuffPoint?"
         Dataset = COCOStuffDataset
         in_channels = 3
         labels = dataset_params.get('labels', [1])
         out_channels = len(labels)
+        dataset_kwargs['labels'] = labels
+    elif dataset_params['type'] == 'COCOStuffPoint':
+        assert model_type == 'patchgan_point', "model_type should be set to 'patchgan_point' to use the COCOStuffPoint dataset. Did you mean COCOStuff?"
+        Dataset = COCOStuffPointDataset
+        in_channels = 3
+        labels = dataset_params.get('labels', [1])
+        out_channels = 1
         dataset_kwargs['labels'] = labels
     else:
         try:
@@ -87,7 +104,9 @@ def patchgan_train():
     model = None
     checkpoint_file = config.get('load_from_checkpoint', '')
     if os.path.isfile(checkpoint_file):
-        model = PatchGAN.load_from_checkpoint(checkpoint_file)
+        model = patchgan_model.load_from_checkpoint(checkpoint_file)
+    elif config.get('transfer_learn', {}).get('checkpoint', None) is not None:
+        model = patchgan_model.load_transfer_data(config['transfer_learn']['checkpoint'], in_channels, out_channels)
 
     if model is None:
         model_params = config['model_params']
@@ -112,17 +131,15 @@ def patchgan_train():
         lr_decay = train_params.get('decay_rate', 0.98)
         decay_freq = train_params.get('decay_freq', 5)
         save_freq = train_params.get('save_freq', 10)
-        model = PatchGAN(in_channels, out_channels, gen_filts, disc_filts, final_activation, n_disc_layers, use_dropout,
-                         activation, disc_norm, gen_learning_rate, dsc_learning_rate, lr_decay, decay_freq,
-                         loss_type=loss_type, seg_alpha=seg_alpha)
-
-    if config.get('transfer_learn', {}).get('checkpoint', None) is not None:
-        checkpoint = torch.load(config['transfer_learn']['checkpoint'], map_location=device)
-        model.generator.load_transfer_data({key.replace('PatchGAN.', ''): value for key, value in checkpoint['state_dict'].items() if 'generator' in key})
-        model.discriminator.load_transfer_data({key.replace('PatchGAN.', ''): value for key, value in checkpoint['state_dict'].items() if 'discriminator' in key})
+        model = patchgan_model(in_channels, out_channels, gen_filts, disc_filts, final_activation, n_disc_layers, use_dropout,
+                               activation, disc_norm, gen_learning_rate, dsc_learning_rate, lr_decay, decay_freq,
+                               loss_type=loss_type, seg_alpha=seg_alpha)
 
     if args.summary:
-        summary(model.generator, [1, in_channels, size, size], depth=4)
+        if model_type == 'patchgan':
+            summary(model, [1, in_channels, size, size], depth=4)
+        elif model_type == 'patchgan_point':
+            summary(model, [[1, in_channels, size, size], [1, 2]], depth=4)
         summary(model.discriminator, [1, in_channels + out_channels, size, size])
 
     checkpoint_callback = ModelCheckpoint(dirpath=checkpoint_path,
