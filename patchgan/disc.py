@@ -1,8 +1,9 @@
 from torch import nn
 from .transfer import Transferable
+from .conv_layers import weights_init
 
 
-class Discriminator(nn.Module, Transferable):
+class Discriminator(nn.Sequential, Transferable):
     """Defines a PatchGAN discriminator"""
 
     def __init__(self, input_nc, ndf=64, n_layers=3, norm=False, norm_layer=nn.InstanceNorm2d):
@@ -13,7 +14,6 @@ class Discriminator(nn.Module, Transferable):
             n_layers (int)  -- the number of conv layers in the discriminator
             norm_layer      -- normalization layer
         """
-        super(Discriminator, self).__init__()
         kw = 4
         padw = 1
         sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw,
@@ -44,8 +44,6 @@ class Discriminator(nn.Module, Transferable):
         # output 1 channel prediction map
         sequence += [nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw,
                                stride=1, padding=padw), nn.Sigmoid()]
-        self.model = nn.Sequential(*sequence)
+        super().__init__(*sequence)
 
-    def forward(self, input):
-        """Standard forward."""
-        return self.model(input)
+        self.apply(weights_init)

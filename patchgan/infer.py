@@ -1,71 +1,80 @@
 import torch
 from torchinfo import summary
-from patchgan.unet import UNet
-from patchgan.disc import Discriminator
-from patchgan.io import COCOStuffDataset
+from .io import COCOStuffDataset
+from .patchgan import PatchGAN
 import yaml
 import tqdm
 import os
-import numpy as np
 import importlib.machinery
 import argparse
+from torch import nn
+from einops import rearrange
+import lightning as L
 
 
-def n_crop(image, size, overlap):
-    c, height, width = image.shape
+class InferenceModel(L.LightningModule):
+    '''
+        Wrapper for running PatchGAN with a crop inference mode,
+        where the input images are cropped with overlap into (patch_size x patch_size)
+    '''
 
-    effective_size = int(overlap * size)
+    def __init__(self, model: PatchGAN, patch_size: int):
+        super().__init__()
+        self.save_hyperparameters()
+        self.model = model
 
-    ncropsy = int(np.ceil(height / effective_size))
-    ncropsx = int(np.ceil(width / effective_size))
+    def forward(self, img: torch.Tensor) -> torch.Tensor:
+        '''
+            run the image forward through the patch generation stage
+            and then through the patchGAN
+        '''
+        C, H, W = img.shape
 
-    crops = torch.zeros((ncropsx * ncropsy, c, size, size), device=image.device)
+        assert H == W, "PatchGAN currently only supports square images"
+        image_size = H
 
-    for j in range(ncropsy):
-        for i in range(ncropsx):
-            starty = j * effective_size
-            startx = i * effective_size
+        patch_size = self.hparams.patch_size
 
-            starty -= max([starty + size - height, 0])
-            startx -= max([startx + size - width, 0])
+        # find the optimal stride
+        # this stride should cover the whole image with minimal overlap
+        # essentially solving (n - 1) * (kernel_size + 1) >= image_size
+        # for the n = number of overlapping patches in each dimension
+        for i in range(2, 10):
+            n = (image_size - patch_size) // patch_size + i
+            stride = (image_size - patch_size) // (n - 1)
+            if stride * (n - 1) + patch_size == image_size:
+                break
 
-            crops[j * ncropsy + i, :] = image[:, starty:starty + size, startx:startx + size]
+        # check to make sure we got convergence
+        if stride * (n - 1) + patch_size != image_size:
+            raise ValueError(f"Could fit {image_size} into window of size {patch_size}")
 
-    return crops
+        # create the parameter dict for torch's fold and unfold functions
+        fold_params = {'kernel_size': patch_size, 'stride': stride, 'dilation': 1, 'padding': 0}
 
+        # we will also apply this to a ones array to get the number of patches that cover each pixel
+        # we will divide the final mask by this count to normalize the number of predictions per pixel
+        count = self.fold(self.unfold(torch.ones_like(img), fold_params), fold_params, image_size)
+        masks = self.fold(self.model(self.unfold(img, fold_params)), fold_params, image_size)
 
-def build_mask(masks, crop_size, image_size, threshold, overlap):
-    n, c, height, width = masks.shape
-    image_height, image_width = image_size
-    mask = np.zeros((c, *image_size))
-    count = np.zeros((c, *image_size))
+        return masks / count
 
-    effective_size = int(overlap * crop_size)
+    def fold(self, x, fold_params, image_size):
+        '''
+            Folding function. Given an input of (l, channels, patch_size, patch_size), returns the
+            reconstructed image of (channels, image_size, image_size)
+        '''
+        x = rearrange(x, 'l c h w -> (c h w) l')
+        return nn.functional.fold(x, output_size=(image_size, image_size), **fold_params)
 
-    ncropsy = int(np.ceil(image_height / effective_size))
-    ncropsx = int(np.ceil(image_width / effective_size))
-
-    for j in range(ncropsy):
-        for i in range(ncropsx):
-            starty = j * effective_size
-            startx = i * effective_size
-            starty -= max([starty + crop_size - image_height, 0])
-            startx -= max([startx + crop_size - image_width, 0])
-            endy = starty + crop_size
-            endx = startx + crop_size
-
-            mask[:, starty:endy, startx:endx] += masks[j * ncropsy + i, :]
-            count[:, starty:endy, startx:endx] += 1
-    mask = mask / count
-
-    if threshold > 0:
-        mask[mask >= threshold] = 1
-        mask[mask < threshold] = 0
-
-    if c > 1:
-        return np.argmax(mask, axis=0)
-    else:
-        return mask[0]
+    def unfold(self, x, fold_params):
+        '''
+            Unfolding function. Given an input of (channels, image_size, image_size) returns the set
+            of overlapping patches of size (l, channels, patch_size, patch_size)
+        '''
+        x = nn.functional.unfold(x, **fold_params)
+        return rearrange(x, '(c h w) l -> l c h w', c=self.model.hparams.input_channels,
+                         h=self.hparams.patch_size, w=self.hparams.patch_size)
 
 
 def patchgan_infer():
@@ -77,7 +86,7 @@ def patchgan_infer():
     parser.add_argument('-c', '--config_file', required=True, type=str, help='Location of the config YAML file')
     parser.add_argument('--dataloader_workers', default=4, type=int, help='Number of workers to use with dataloader (set to 0 to disable multithreading)')
     parser.add_argument('-d', '--device', default='auto', help='Device to use to train the model (CUDA=GPU)')
-    parser.add_argument('--summary', default=True, action='store_true', help="Print summary of the models")
+    parser.add_argument('--summary', action='store_true', help="Print summary of the models")
 
     args = parser.parse_args()
 
@@ -94,14 +103,12 @@ def patchgan_infer():
     dataset_params = config['dataset']
     dataset_path = dataset_params['dataset_path']
 
-    size = dataset_params.get('size', 256)
+    patch_size = dataset_params.get('patch_size', 256)
 
     dataset_kwargs = {}
     if dataset_params['type'] == 'COCOStuff':
         Dataset = COCOStuffDataset
-        in_channels = 3
         labels = dataset_params.get('labels', [1])
-        out_channels = len(labels)
         dataset_kwargs['labels'] = labels
     else:
         try:
@@ -113,8 +120,6 @@ def patchgan_infer():
         except (ImportError, ModuleNotFoundError):
             print(f"io.py does not contain {dataset_params['type']}")
             raise
-        in_channels = dataset_params.get('in_channels', 3)
-        out_channels = dataset_params.get('out_channels', 1)
 
     assert hasattr(Dataset, 'get_filename') and callable(Dataset.get_filename), \
         f"Dataset class {Dataset.__name__} must have the get_filename method which returns the image filename for a given index"
@@ -124,26 +129,10 @@ def patchgan_infer():
 
     datagen = Dataset(dataset_path, **dataset_kwargs)
 
-    model_params = config['model_params']
-    gen_filts = model_params['gen_filts']
-    disc_filts = model_params['disc_filts']
-    n_disc_layers = model_params['n_disc_layers']
-    activation = model_params['activation']
-    final_activation = model_params.get('final_activation', 'sigmoid')
+    model_checkpoint = config['model_checkpoint']
 
-    # create the generator
-    generator = UNet(in_channels, out_channels, gen_filts, activation=activation, final_act=final_activation).to(device)
-
-    # create the discriminator
-    discriminator = Discriminator(in_channels + out_channels, disc_filts, n_layers=n_disc_layers).to(device)
-
-    if args.summary:
-        summary(generator, [1, in_channels, size, size], device=device)
-        summary(discriminator, [1, in_channels + out_channels, size, size], device=device)
-
-    checkpoint_paths = config['checkpoint_paths']
-    gen_checkpoint = checkpoint_paths['generator']
-    dsc_checkpoint = checkpoint_paths['discriminator']
+    # create the patchGAN
+    model = PatchGAN.load_from_checkpoint(model_checkpoint)
 
     infer_params = config.get('infer_params', {})
     output_path = infer_params.get('output_path', 'predictions/')
@@ -152,23 +141,18 @@ def patchgan_infer():
         os.makedirs(output_path)
         print(f"Created folder {output_path}")
 
-    generator.eval()
-    discriminator.eval()
+    model.eval()
 
-    generator.load_state_dict(torch.load(gen_checkpoint, map_location=device))
-    discriminator.load_state_dict(torch.load(dsc_checkpoint, map_location=device))
+    inferencemodel = InferenceModel(model, patch_size)
 
-    threshold = infer_params.get('threshold', 0)
-    overlap = infer_params.get('overlap', 0.9)
+    if args.summary:
+        summary(inferencemodel, datagen[0].shape, device=device)
 
     for i, data in enumerate(tqdm.tqdm(datagen, desc='Predicting', dynamic_ncols=True, ascii=True)):
-        imgs = n_crop(data, size, overlap)
         out_fname, _ = os.path.splitext(datagen.get_filename(i))
 
         with torch.no_grad():
-            img_tensor = torch.Tensor(imgs).to(device)
-            masks = generator(img_tensor).cpu().numpy()
-
-        mask = build_mask(masks, size, data.shape[1:], threshold, overlap)
+            img_tensor = torch.Tensor(data).to(device)
+            mask = inferencemodel(img_tensor).cpu().numpy()
 
         Dataset.save_mask(mask, output_path, out_fname)
