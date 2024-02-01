@@ -86,7 +86,7 @@ def patchgan_infer():
     parser.add_argument('-c', '--config_file', required=True, type=str, help='Location of the config YAML file')
     parser.add_argument('--dataloader_workers', default=4, type=int, help='Number of workers to use with dataloader (set to 0 to disable multithreading)')
     parser.add_argument('-d', '--device', default='auto', help='Device to use to train the model (CUDA=GPU)')
-    parser.add_argument('--summary', default=True, action='store_true', help="Print summary of the models")
+    parser.add_argument('--summary', action='store_true', help="Print summary of the models")
 
     args = parser.parse_args()
 
