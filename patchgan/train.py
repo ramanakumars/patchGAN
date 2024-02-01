@@ -11,6 +11,10 @@ import importlib.machinery
 import argparse
 
 
+with open(os.path.join(os.path.split(__file__)[0], 'labels.yaml'), 'r') as infile:
+    coco_labels = yaml.safe_load(infile)
+
+
 def patchgan_train():
     parser = argparse.ArgumentParser(
         prog='PatchGAN',
@@ -63,14 +67,22 @@ def patchgan_train():
         Dataset = COCOStuffDataset
         in_channels = 3
         labels = dataset_params.get('labels', [1])
-        out_channels = len(labels)
+        if isinstance(labels, list):
+            labels = sorted(labels)
+        elif labels == 'all':
+            labels = sorted(coco_labels.keys())
+        out_channels = len(labels) + 1  # include a background channel
         dataset_kwargs['labels'] = labels
     elif dataset_params['type'] == 'COCOStuffPoint':
         assert model_type == 'patchgan_point', "model_type should be set to 'patchgan_point' to use the COCOStuffPoint dataset. Did you mean COCOStuff?"
         Dataset = COCOStuffPointDataset
         in_channels = 3
         labels = dataset_params.get('labels', [1])
-        out_channels = 1
+        if isinstance(labels, list):
+            labels = sorted(labels)
+        elif labels == 'all':
+            labels = sorted(coco_labels.keys())
+        out_channels = len(labels) + 1  # include a background channel
         dataset_kwargs['labels'] = labels
     else:
         try:

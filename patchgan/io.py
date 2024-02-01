@@ -10,7 +10,7 @@ from torchvision import transforms
 class COCOStuffDataset(Dataset):
     augmentation = None
 
-    def __init__(self, imgfolder, maskfolder, labels=[1], size=256, augmentation='randomcrop'):
+    def __init__(self, imgfolder, maskfolder, labels='all', size=256, augmentation='randomcrop'):
         self.images = np.asarray(sorted(glob.glob(os.path.join(imgfolder, "*.jpg"))))
         self.masks = np.asarray(sorted(glob.glob(os.path.join(maskfolder, "*.png"))))
         self.size = size
@@ -51,11 +51,11 @@ class COCOStuffDataset(Dataset):
         img = data_stacked[:3, :]
         labels = data_stacked[3, :]
 
-        mask = torch.zeros((len(self.labels), labels.shape[0], labels.shape[1]))
-        for i, label in enumerate(self.labels):
-            mask[i, labels == label] = 1
+        mask = torch.ones(labels.shape, dtype=torch.long)
+        for label in self.labels:
+            mask[labels == label] = self.labels.index(label)
 
-        return img, mask
+        return img, mask.to(torch.long)
 
 
 class COCOStuffPointDataset(COCOStuffDataset):
@@ -82,8 +82,9 @@ class COCOStuffPointDataset(COCOStuffDataset):
         img = data_stacked[:3, :]
         labels = data_stacked[3, :]
 
-        mask = torch.zeros((1, labels.shape[0], labels.shape[1]))
+        mask = torch.zeros((labels.shape[0], labels.shape[1]))
         label = labels[int(point[1]), int(point[0])]
-        mask[0, labels == label] = 1
+        if label in self.labels:
+            mask[labels == label] = self.labels.index(label)
 
-        return img, point, mask
+        return img, point, mask.to(torch.long)
